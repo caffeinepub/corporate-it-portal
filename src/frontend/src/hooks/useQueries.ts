@@ -1,6 +1,6 @@
 import type { Principal } from "@icp-sdk/core/principal";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type UserProfile, UserRole, UserStatus } from "../backend.d";
+import { type UserProfile, UserRole, UserStatus } from "../backend";
 import { useActor } from "./useActor";
 
 export { UserRole, UserStatus };

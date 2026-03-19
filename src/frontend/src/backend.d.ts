@@ -1,45 +1,57 @@
-import type { Principal } from "@icp-sdk/core/principal";
-export interface Some<T> {
-    __kind__: "Some";
-    value: T;
-}
-export interface None {
-    __kind__: "None";
-}
-export type Option<T> = Some<T> | None;
-export interface UserProfile {
-    registrationPurpose: string;
-    status: UserStatus;
-    principal: Principal;
-    country: string;
-    dateOfBirth: string;
+export interface RegistrationRecord {
+    id: string;
     name: string;
-    roleTitle: string;
-    rejectionReason?: string;
+    dateOfBirth: string;
     email: string;
     mobile: string;
+    country: string;
+    roleTitle: string;
+    registrationPurpose: string;
+    deviceInfo: string;
+    timestamp: bigint;
+    status: { pending: null } | { approved: null } | { rejected: null };
+    rejectionReason: string | null;
+    loginUsername: string | null;
+    loginPassword: string | null;
 }
-export enum UserRole {
-    admin = "admin",
-    user = "user",
-    guest = "guest"
+
+export interface FailedLog {
+    email: string;
+    roleTitle: string;
+    errorMsg: string;
+    deviceInfo: string;
+    timestamp: bigint;
 }
-export enum UserStatus {
-    pending = "pending",
-    approved = "approved",
-    rejected = "rejected"
+
+export interface RegistrationStats {
+    total: bigint;
+    pending: bigint;
+    approved: bigint;
+    rejected: bigint;
+    failed: bigint;
 }
+
 export interface backendInterface {
-    approveUser(user: Principal): Promise<void>;
-    assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
-    getAllRegistrations(): Promise<Array<UserProfile>>;
-    getCallerUserProfile(): Promise<UserProfile>;
-    getCallerUserRole(): Promise<UserRole>;
-    getMyRegistrationStatus(): Promise<UserProfile | null>;
-    getPendingRegistrations(): Promise<Array<UserProfile>>;
-    getUserProfile(user: Principal): Promise<UserProfile>;
-    isCallerAdmin(): Promise<boolean>;
-    registerUser(name: string, dateOfBirth: string, email: string, mobile: string, country: string, roleTitle: string, registrationPurpose: string): Promise<void>;
-    rejectUser(user: Principal, reason: string): Promise<void>;
-    saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    adminLogin(username: string, password: string): Promise<string | null>;
+    verifyAdminToken(token: string): Promise<boolean>;
+    logoutAdmin(token: string): Promise<void>;
+    submitRegistration(
+        name: string,
+        dateOfBirth: string,
+        email: string,
+        mobile: string,
+        country: string,
+        roleTitle: string,
+        registrationPurpose: string,
+        deviceInfo: string
+    ): Promise<string>;
+    getRegistrationStatusByEmail(email: string): Promise<RegistrationRecord | null>;
+    getRegistrationStatusById(id: string): Promise<RegistrationRecord | null>;
+    getAllRegistrations(token: string): Promise<RegistrationRecord[]>;
+    getPendingRegistrations(token: string): Promise<RegistrationRecord[]>;
+    approveRegistration(token: string, regId: string): Promise<boolean>;
+    rejectRegistration(token: string, regId: string, reason: string): Promise<boolean>;
+    logFailedRegistration(email: string, roleTitle: string, errorMsg: string, deviceInfo: string): Promise<void>;
+    getFailedLogs(token: string): Promise<FailedLog[]>;
+    getRegistrationStats(token: string): Promise<RegistrationStats>;
 }

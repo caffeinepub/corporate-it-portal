@@ -1,629 +1,566 @@
-import { CheckCircle2, Clock, Loader2, LogIn, X, XCircle } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
-import { useInternetIdentity } from "../hooks/useInternetIdentity";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
-  UserStatus,
-  useGetMyRegistrationStatus,
-  useRegisterUser,
-} from "../hooks/useQueries";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { CheckCircle, ChevronRight, Copy, Loader2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { RoleDef } from "../App";
+import { useBackend } from "../hooks/useBackend";
 
-const REGISTRATION_PURPOSES = [
+const PURPOSES = [
+  "IT Infrastructure Management",
+  "Software Development & Deployment",
+  "Network Operations & Security",
+  "Cloud Solutions & DevOps",
+  "Data Analytics & Business Intelligence",
+  "System Administration",
   "Project Management",
-  "Site Operations",
-  "Human Resources",
-  "Executive Management",
-  "Kitchen & Catering Operations",
-  "Guest Relations",
-  "Quality Control & Compliance",
-  "IT Infrastructure",
-  "Finance & Administration",
-  "Training & Development",
+  "Quality Assurance & Testing",
+  "Technical Support & Helpdesk",
+  "Corporate IT Consulting",
 ];
 
-const APPROVAL_MESSAGE =
-  "Welcome to the Corporate IT Portal! Your registration has been reviewed and approved by our administration team. You now have full access to your designated role dashboard and all associated enterprise tools. As a valued member of our corporate IT ecosystem, we expect you to uphold our standards of professionalism, data security, and operational excellence. Your login credentials are active and tied to your Internet Identity. Please review the role guidelines available in your dashboard. We look forward to your contributions to our growing team. If you have any questions, contact the system administrator immediately. Welcome aboard!";
-
-const REJECTION_MESSAGE =
-  "Thank you for your interest in joining the Corporate IT Portal. After careful review by our administration team, we regret to inform you that your registration request has not been approved at this time. This decision may be due to incomplete information, role capacity limitations, or administrative requirements. We encourage you to review your submitted details and resubmit your application with accurate and complete information. If you believe this decision was made in error, please contact the system administrator for further clarification. We appreciate your understanding and hope to welcome you to our team in the future.";
-
-interface RoleInfo {
-  title: string;
-  color: string;
-  icon: React.ComponentType<{ size?: number; color?: string }>;
-}
-
-interface RegistrationModalProps {
-  role: RoleInfo | null;
+interface Props {
+  role: RoleDef;
   onClose: () => void;
+  onStatusCheck?: (email: string) => void;
 }
 
-function StatusScreen({
-  status,
-  profile,
-  onClose,
-}: {
-  status: "pending" | "approved" | "rejected";
-  profile: {
-    name: string;
-    roleTitle: string;
-    email: string;
-    rejectionReason?: string;
-  };
-  onClose: () => void;
-}) {
-  const isPending = status === "pending";
-  const isApproved = status === "approved";
-  const isRejected = status === "rejected";
+type Stage = "form" | "loading" | "success" | "error";
 
-  const badgeStyle = isPending
-    ? {
-        bg: "rgba(255,193,7,0.12)",
-        border: "rgba(255,193,7,0.4)",
-        color: "#ffd93d",
-        glow: "rgba(255,193,7,0.3)",
-      }
-    : isApproved
-      ? {
-          bg: "rgba(74,222,128,0.12)",
-          border: "rgba(74,222,128,0.4)",
-          color: "#4ade80",
-          glow: "rgba(74,222,128,0.3)",
-        }
-      : {
-          bg: "rgba(255,107,107,0.12)",
-          border: "rgba(255,107,107,0.4)",
-          color: "#ff6b6b",
-          glow: "rgba(255,107,107,0.3)",
-        };
+type Fields = {
+  name: string;
+  dob: string;
+  email: string;
+  mobile: string;
+  country: string;
+  purpose: string;
+};
 
-  return (
-    <div className="text-center">
-      <div
-        className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
-        style={{
-          background: badgeStyle.bg,
-          border: `1px solid ${badgeStyle.border}`,
-          boxShadow: `0 0 24px ${badgeStyle.glow}`,
-        }}
-      >
-        {isPending && <Clock size={28} color={badgeStyle.color} />}
-        {isApproved && <CheckCircle2 size={28} color={badgeStyle.color} />}
-        {isRejected && <XCircle size={28} color={badgeStyle.color} />}
-      </div>
-
-      <div
-        className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest mb-4"
-        style={{
-          background: badgeStyle.bg,
-          border: `1px solid ${badgeStyle.border}`,
-          color: badgeStyle.color,
-        }}
-        data-ocid="registration.success_state"
-      >
-        {isPending && "⏳ Awaiting Admin Approval"}
-        {isApproved && "✓ Access Granted"}
-        {isRejected && "✗ Registration Rejected"}
-      </div>
-
-      <p className="text-white font-bold text-base mb-1">{profile.name}</p>
-      <p className="text-xs mb-5" style={{ color: "#a9b6c6" }}>
-        Role: {profile.roleTitle}
-      </p>
-
-      <div
-        className="text-left p-4 rounded-xl mb-5 text-xs leading-relaxed"
-        style={{
-          background: "rgba(255,255,255,0.04)",
-          border: `1px solid ${badgeStyle.border}`,
-          color: "#c8d8e8",
-        }}
-      >
-        {isApproved && APPROVAL_MESSAGE}
-        {isRejected && (
-          <>
-            <p>{REJECTION_MESSAGE}</p>
-            {profile.rejectionReason && (
-              <div
-                className="mt-3 p-3 rounded-lg"
-                style={{
-                  background: "rgba(255,107,107,0.08)",
-                  border: "1px solid rgba(255,107,107,0.2)",
-                }}
-              >
-                <p
-                  className="text-xs font-bold mb-1"
-                  style={{ color: "#ff6b6b" }}
-                >
-                  Rejection Reason:
-                </p>
-                <p style={{ color: "#f0c0c0" }}>{profile.rejectionReason}</p>
-              </div>
-            )}
-          </>
-        )}
-        {isPending && (
-          <p>
-            Your registration has been submitted successfully. Our
-            administration team will review your application and notify you upon
-            approval. Please check back later or contact your system
-            administrator for updates. Thank you for your patience.
-          </p>
-        )}
-      </div>
-
-      <button
-        type="button"
-        onClick={onClose}
-        className="btn-cyan px-6 py-2 rounded-xl text-sm font-semibold"
-        data-ocid="registration.close_button"
-      >
-        Close
-      </button>
-    </div>
-  );
+function validate(f: Fields): string {
+  if (!f.name.trim()) return "Full Name is required.";
+  if (!f.dob) return "Date of Birth is required.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email))
+    return "Valid email address is required.";
+  if (!/^[0-9]{6,15}$/.test(f.mobile.replace(/[\s+\-()]/g, "")))
+    return "Valid mobile number is required (digits only, 6-15 digits).";
+  if (!f.country.trim()) return "Country is required.";
+  if (!f.purpose) return "Please select a Registration Purpose.";
+  return "";
 }
 
-interface RegistrationFormProps {
-  role: RoleInfo;
-  onSuccess: () => void;
-  existingRoleTitle?: string;
+function initFields(): Fields {
+  return { name: "", dob: "", email: "", mobile: "", country: "", purpose: "" };
 }
 
-function RegistrationForm({
-  role,
-  onSuccess,
-  existingRoleTitle,
-}: RegistrationFormProps) {
-  const [form, setForm] = useState({
-    name: "",
-    dateOfBirth: "",
-    email: "",
-    mobile: "",
-    country: "",
-    registrationPurpose: "",
-  });
-  const [touched, setTouched] = useState<Record<string, boolean>>({});
-  const [duplicateError, setDuplicateError] = useState<string | null>(null);
-  const registerUser = useRegisterUser();
-  const { identity, login, loginStatus } = useInternetIdentity();
-  const isAuthenticated = !!identity;
-  const isLoggingIn = loginStatus === "logging-in";
+type BackendActor = {
+  submitRegistration(
+    name: string,
+    dateOfBirth: string,
+    email: string,
+    mobile: string,
+    country: string,
+    roleTitle: string,
+    registrationPurpose: string,
+    deviceInfo: string,
+  ): Promise<string>;
+  logFailedRegistration(
+    email: string,
+    roleTitle: string,
+    errorMsg: string,
+    deviceInfo: string,
+  ): Promise<void>;
+};
 
-  // Store pending form data to submit after login
-  const pendingSubmitRef = useRef(false);
-
-  // Auto-submit after login if there's a pending submit
+export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
+  const { actor, isFetching } = useBackend();
+  const actorRef = useRef(actor);
   useEffect(() => {
-    if (isAuthenticated && pendingSubmitRef.current) {
-      pendingSubmitRef.current = false;
-      doSubmit();
+    actorRef.current = actor;
+  }, [actor]);
+  const [fields, setFields] = useState<Fields>(initFields);
+  const [stage, setStage] = useState<Stage>("form");
+  const [regId, setRegId] = useState("");
+  const [errMsg, setErrMsg] = useState("");
+  const [loadingMsg, setLoadingMsg] = useState("Submitting Registration...");
+  const [fieldError, setFieldError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  function set(k: keyof Fields) {
+    return (v: string) => setFields((p) => ({ ...p, [k]: v }));
+  }
+
+  async function waitForActor(maxWaitMs = 15000): Promise<BackendActor | null> {
+    if (actorRef.current) return actorRef.current as unknown as BackendActor;
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+      await new Promise((r) => setTimeout(r, 800));
+      if (actorRef.current) return actorRef.current as unknown as BackendActor;
     }
-  }, [isAuthenticated]);
+    return null;
+  }
 
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email);
-  const mobileValid = /^[0-9+\-\s]{7,15}$/.test(form.mobile);
-
-  const errors: Record<string, string> = {};
-  if (touched.name && !form.name.trim()) errors.name = "Full name is required";
-  if (touched.email && !form.email) errors.email = "Email is required";
-  else if (touched.email && !emailValid)
-    errors.email = "Enter a valid email address";
-  if (touched.mobile && !form.mobile)
-    errors.mobile = "Mobile number is required";
-  else if (touched.mobile && !mobileValid)
-    errors.mobile = "Enter a valid mobile number (7-15 digits)";
-  if (touched.dateOfBirth && !form.dateOfBirth)
-    errors.dateOfBirth = "Date of birth is required";
-  if (touched.country && !form.country.trim())
-    errors.country = "Country is required";
-  if (touched.registrationPurpose && !form.registrationPurpose)
-    errors.registrationPurpose = "Please select a purpose";
-
-  const isFormValid =
-    form.name.trim() &&
-    form.dateOfBirth &&
-    emailValid &&
-    mobileValid &&
-    form.country.trim() &&
-    form.registrationPurpose;
-
-  const doSubmit = async () => {
-    if (!isFormValid) return;
-    setDuplicateError(null);
-    try {
-      await registerUser.mutateAsync({
-        name: form.name.trim(),
-        dateOfBirth: form.dateOfBirth,
-        email: form.email,
-        mobile: form.mobile,
-        country: form.country.trim(),
-        roleTitle: role.title,
-        registrationPurpose: form.registrationPurpose,
-      });
-      toast.success("Registration submitted! Awaiting admin approval.");
-      onSuccess();
-    } catch (err: any) {
-      const msg = err?.message ?? "";
-      if (msg.includes("already registered") || msg.includes("duplicate")) {
-        setDuplicateError(
-          `You are already registered for ${existingRoleTitle ?? "another role"}. One registration per user is allowed.`,
-        );
-      } else {
-        toast.error(msg || "Registration failed. Please try again.");
-      }
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setTouched({
-      name: true,
-      dateOfBirth: true,
-      email: true,
-      mobile: true,
-      country: true,
-      registrationPurpose: true,
-    });
-    if (!isFormValid) return;
+    const err = validate(fields);
+    if (err) {
+      setFieldError(err);
+      return;
+    }
+    setFieldError("");
+    setStage("loading");
+    setLoadingMsg("Connecting to server...");
+    setErrMsg("");
 
-    if (!isAuthenticated) {
-      // Mark pending submit, then trigger login
-      pendingSubmitRef.current = true;
-      toast.info("Please connect your Identity to complete registration.");
-      login();
+    const nb = await waitForActor();
+    if (!nb) {
+      setErrMsg(
+        "Cannot reach server. Please check your internet connection and try again.",
+      );
+      setStage("error");
       return;
     }
 
-    await doSubmit();
-  };
+    setLoadingMsg("Submitting your registration...");
+    const deviceInfo = `${navigator.userAgent} | ${navigator.language} | ${screen.width}x${screen.height}`;
 
-  const field = (
-    key: string,
-    value: string,
-    label: string,
-    extras: React.InputHTMLAttributes<HTMLInputElement> = {},
-  ) => (
-    <div className="mb-3">
-      <label
-        className="block text-xs text-gray-400 uppercase tracking-wider mb-1.5"
-        htmlFor={`reg-${key}`}
-      >
-        {label} <span style={{ color: "#ff6b6b" }}>*</span>
-      </label>
-      <input
-        id={`reg-${key}`}
-        value={value}
-        onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
-        onBlur={() => setTouched((p) => ({ ...p, [key]: true }))}
-        className="w-full px-3 py-2.5 rounded-xl text-white placeholder-gray-500 text-sm outline-none transition-all"
-        style={{
-          background: "rgba(255,255,255,0.06)",
-          border: errors[key]
-            ? "1px solid rgba(255,100,100,0.6)"
-            : "1px solid rgba(100,200,240,0.2)",
-        }}
-        data-ocid={`registration.${key}.input`}
-        {...extras}
-      />
-      {errors[key] && (
-        <p
-          className="text-xs mt-1"
-          style={{ color: "#ff6b6b" }}
-          data-ocid={`registration.${key}_error`}
-        >
-          {errors[key]}
-        </p>
-      )}
-    </div>
-  );
+    const attempt = async () =>
+      nb.submitRegistration(
+        fields.name.trim(),
+        fields.dob,
+        fields.email.trim().toLowerCase(),
+        fields.mobile.trim(),
+        fields.country.trim(),
+        role.title,
+        fields.purpose,
+        deviceInfo,
+      );
 
-  const isSubmitting = registerUser.isPending || isLoggingIn;
+    try {
+      const id = await attempt();
+      if (!id || id.trim() === "")
+        throw new Error("Server returned an empty registration ID.");
+      localStorage.setItem(
+        `nexus_reg_${fields.email.trim().toLowerCase()}`,
+        id,
+      );
+      setRegId(id);
+      setStage("success");
+    } catch (_e1) {
+      setLoadingMsg("Retrying...");
+      await new Promise((r) => setTimeout(r, 2500));
+      try {
+        const id = await attempt();
+        if (!id || id.trim() === "")
+          throw new Error("Server returned an empty registration ID.");
+        localStorage.setItem(
+          `nexus_reg_${fields.email.trim().toLowerCase()}`,
+          id,
+        );
+        setRegId(id);
+        setStage("success");
+      } catch (e2) {
+        const msg =
+          e2 instanceof Error
+            ? e2.message
+            : "Submission failed. Please try again.";
+        nb.logFailedRegistration(
+          fields.email.trim(),
+          role.title,
+          msg,
+          deviceInfo,
+        ).catch(() => {});
+        setErrMsg(msg);
+        setStage("error");
+      }
+    }
+  }
+
+  function copyRegId() {
+    navigator.clipboard.writeText(regId).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  const greetingMessage = `Dear ${fields.name || "Valued Applicant"}, thank you for registering on the NEXUS IT PORTAL — EBC Booking Management System. Your registration request has been received and is currently under review by our administration team. We will process your application at the earliest and notify you of the outcome. Please save your Registration ID for future reference. Our team is committed to reviewing all requests promptly and professionally. We sincerely appreciate your patience and look forward to welcoming you to our enterprise network. — NEXUS IT Portal Administration`;
 
   return (
-    <form onSubmit={handleSubmit}>
-      {/* Heading */}
-      <p
-        className="text-xs uppercase tracking-widest mb-4"
-        style={{ color: "#a9b6c6" }}
-      >
-        Fill in your details to register
-      </p>
-
-      {/* Role badge — pre-filled, read-only */}
-      <div className="mb-3">
-        <p className="block text-xs text-gray-400 uppercase tracking-wider mb-1.5">
-          Role
-        </p>
-        <div
-          className="w-full px-3 py-2.5 rounded-xl text-sm font-semibold"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            border: `1px solid ${role.color}44`,
-            color: role.color,
-          }}
-        >
-          {role.title}
-        </div>
-      </div>
-
-      {field("name", form.name, "Full Name", {
-        type: "text",
-        autoComplete: "name",
-        placeholder: "Enter your full name",
-      })}
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          {field("dateOfBirth", form.dateOfBirth, "Date of Birth", {
-            type: "date",
-            max: new Date().toISOString().split("T")[0],
-          })}
-        </div>
-        <div>
-          {field("country", form.country, "Country", {
-            type: "text",
-            placeholder: "e.g. India",
-          })}
-        </div>
-      </div>
-
-      {field("email", form.email, "Email ID", {
-        type: "email",
-        autoComplete: "email",
-        placeholder: "name@company.com",
-      })}
-
-      {field("mobile", form.mobile, "Mobile Number", {
-        type: "tel",
-        placeholder: "+91 9876543210",
-      })}
-
-      {/* Registration Purpose */}
-      <div className="mb-4">
-        <label
-          className="block text-xs text-gray-400 uppercase tracking-wider mb-1.5"
-          htmlFor="reg-purpose"
-        >
-          Registration Purpose <span style={{ color: "#ff6b6b" }}>*</span>
-        </label>
-        <select
-          id="reg-purpose"
-          value={form.registrationPurpose}
-          onChange={(e) =>
-            setForm((p) => ({ ...p, registrationPurpose: e.target.value }))
-          }
-          onBlur={() =>
-            setTouched((p) => ({ ...p, registrationPurpose: true }))
-          }
-          className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none transition-all"
-          style={{
-            background: "rgba(20,36,52,0.95)",
-            border: errors.registrationPurpose
-              ? "1px solid rgba(255,100,100,0.6)"
-              : "1px solid rgba(100,200,240,0.2)",
-            color: form.registrationPurpose ? "white" : "#6b7280",
-          }}
-          data-ocid="registration.registrationPurpose.select"
-        >
-          <option value="" disabled style={{ color: "#6b7280" }}>
-            — Select Purpose —
-          </option>
-          {REGISTRATION_PURPOSES.map((p) => (
-            <option
-              key={p}
-              value={p}
-              style={{ background: "#0d1f2d", color: "white" }}
-            >
-              {p}
-            </option>
-          ))}
-        </select>
-        {errors.registrationPurpose && (
-          <p
-            className="text-xs mt-1"
-            style={{ color: "#ff6b6b" }}
-            data-ocid="registration.purpose_error"
-          >
-            {errors.registrationPurpose}
-          </p>
-        )}
-      </div>
-
-      {/* Duplicate registration error */}
-      {duplicateError && (
-        <div
-          className="mb-4 p-3 rounded-xl text-xs"
-          style={{
-            background: "rgba(255,107,107,0.08)",
-            border: "1px solid rgba(255,107,107,0.35)",
-            color: "#ff8c8c",
-          }}
-          data-ocid="registration.error_state"
-        >
-          ⚠ {duplicateError}
-        </div>
-      )}
-
-      {/* Auth hint when not logged in */}
-      {!isAuthenticated && (
-        <div
-          className="mb-4 p-3 rounded-xl text-xs flex items-center gap-2"
-          style={{
-            background: "rgba(85,214,255,0.06)",
-            border: "1px solid rgba(85,214,255,0.2)",
-            color: "#7dd3fc",
-          }}
-        >
-          <LogIn size={14} />
-          <span>
-            You are not logged in. Clicking <strong>Submit Registration</strong>{" "}
-            will open the Identity login, then auto-submit your form.
-          </span>
-        </div>
-      )}
-
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className="w-full py-3 rounded-xl btn-cyan-solid font-montserrat font-bold uppercase tracking-wider text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-        data-ocid="registration.submit_button"
-      >
-        {isSubmitting ? (
-          <>
-            <Loader2 size={16} className="animate-spin" />
-            {isLoggingIn ? "Connecting Identity..." : "Submitting..."}
-          </>
-        ) : (
-          <>
-            {!isAuthenticated && <LogIn size={15} />}
-            Submit Registration
-          </>
-        )}
-      </button>
-    </form>
-  );
-}
-
-export function RegistrationModal({ role, onClose }: RegistrationModalProps) {
-  const { data: regStatus, isLoading: statusLoading } =
-    useGetMyRegistrationStatus();
-  const { identity } = useInternetIdentity();
-  const [submitted, setSubmitted] = useState(false);
-
-  const isAuthenticated = !!identity;
-
-  if (!role) return null;
-
-  const RoleIcon = role.icon;
-
-  // Determine what to show based on registration status
-  const sameRoleRegistered =
-    !submitted && regStatus && regStatus.roleTitle === role.title;
-  const differentRoleRegistered =
-    !submitted && regStatus && regStatus.roleTitle !== role.title;
-
-  const showStatus = submitted || sameRoleRegistered;
-  return (
-    <motion.div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      data-ocid="registration.modal"
+    <div
+      className="fixed inset-0 flex items-center justify-center z-50 overflow-y-auto py-6"
+      style={{ background: "rgba(2,8,18,0.88)", backdropFilter: "blur(8px)" }}
+      onClick={onClose}
+      onKeyDown={(e) => e.key === "Escape" && onClose()}
+      role="presentation"
     >
       <div
-        className="absolute inset-0"
-        style={{ background: "rgba(4, 12, 20, 0.88)" }}
-      />
-
-      <motion.div
-        className="relative glass-modal w-full max-w-lg p-7 max-h-[90vh] overflow-y-auto"
-        initial={{ scale: 0.92, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.92, opacity: 0, y: 20 }}
-        transition={{ type: "spring", stiffness: 320, damping: 32 }}
+        className="glass-modal w-full max-w-lg mx-4 relative"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+        data-ocid="registration.modal"
       >
-        {/* Close */}
+        {/* Close button */}
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/10"
           data-ocid="registration.close_button"
+          className="absolute top-5 right-5 opacity-50 hover:opacity-100 transition-opacity"
           aria-label="Close"
         >
-          <X size={20} />
+          <X size={18} color="#55d6ff" />
         </button>
 
         {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <div
-            className="icon-tile shrink-0"
-            style={{ borderColor: `${role.color}33` }}
-          >
-            <RoleIcon size={26} color={role.color} />
-          </div>
-          <div>
-            <p className="text-xs text-gray-400 uppercase tracking-widest mb-0.5">
-              Access Portal
-            </p>
-            <h2
-              className="text-sm font-montserrat font-bold uppercase leading-tight tracking-wider"
+        <div
+          className="px-8 pt-8 pb-5"
+          style={{ borderBottom: "1px solid rgba(85,214,255,0.1)" }}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className="icon-tile"
               style={{
-                color: role.color,
-                textShadow: `0 0 12px ${role.color}55`,
+                borderColor: `${role.color}55`,
+                background: `${role.color}18`,
               }}
             >
-              {role.title}
-            </h2>
+              <role.icon size={22} color={role.color} />
+            </div>
+            <div>
+              <p
+                className="text-xs font-montserrat tracking-widest uppercase"
+                style={{ color: "rgba(100,180,220,0.6)" }}
+              >
+                Registration Form
+              </p>
+              <h2 className="font-montserrat font-bold text-sm tracking-wide text-white uppercase leading-tight">
+                {role.title}
+              </h2>
+            </div>
           </div>
         </div>
 
-        {/* Content */}
-        <AnimatePresence mode="wait">
-          {/* Loading state — only when authenticated and checking status */}
-          {isAuthenticated && statusLoading ? (
-            <motion.div
-              key="loading"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="flex flex-col items-center justify-center py-10 gap-3"
+        <div className="px-8 pb-8 pt-6">
+          {/* FORM */}
+          {stage === "form" && (
+            <form
+              onSubmit={handleSubmit}
+              className="space-y-4"
+              data-ocid="registration.panel"
+            >
+              {isFetching && (
+                <div
+                  className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
+                  style={{
+                    background: "rgba(85,214,255,0.06)",
+                    border: "1px solid rgba(85,214,255,0.15)",
+                    color: "rgba(85,214,255,0.6)",
+                  }}
+                >
+                  <Loader2 size={12} className="animate-spin" />
+                  Connecting to server… you can fill the form while waiting.
+                </div>
+              )}
+
+              {(
+                [
+                  ["Full Name", "name", "text", "John Smith"],
+                  ["Date of Birth", "dob", "date", ""],
+                  ["Email Address", "email", "email", "name@company.com"],
+                  ["Mobile Number", "mobile", "tel", "+91 9000000000"],
+                  ["Country", "country", "text", "India"],
+                ] as const
+              ).map(([label, key, type, ph]) => (
+                <div key={key} className="space-y-1">
+                  <Label
+                    className="text-xs font-montserrat tracking-widest uppercase"
+                    style={{ color: "rgba(100,180,220,0.7)" }}
+                  >
+                    {label}
+                  </Label>
+                  <Input
+                    data-ocid={`registration.${key}_input`}
+                    type={type}
+                    value={fields[key]}
+                    onChange={(e) => set(key)(e.target.value)}
+                    placeholder={ph}
+                    style={{
+                      background: "rgba(12,28,42,0.8)",
+                      border: "1px solid rgba(85,214,255,0.22)",
+                      color: "#e2f4ff",
+                    }}
+                  />
+                </div>
+              ))}
+
+              <div className="space-y-1">
+                <Label
+                  className="text-xs font-montserrat tracking-widest uppercase"
+                  style={{ color: "rgba(100,180,220,0.7)" }}
+                >
+                  Registration Purpose
+                </Label>
+                <Select value={fields.purpose} onValueChange={set("purpose")}>
+                  <SelectTrigger
+                    data-ocid="registration.select"
+                    style={{
+                      background: "rgba(12,28,42,0.8)",
+                      border: "1px solid rgba(85,214,255,0.22)",
+                      color: fields.purpose
+                        ? "#e2f4ff"
+                        : "rgba(160,200,230,0.4)",
+                    }}
+                  >
+                    <SelectValue placeholder="Select registration purpose..." />
+                  </SelectTrigger>
+                  <SelectContent
+                    style={{
+                      background: "#091827",
+                      border: "1px solid rgba(85,214,255,0.25)",
+                    }}
+                  >
+                    {PURPOSES.map((p) => (
+                      <SelectItem
+                        key={p}
+                        value={p}
+                        style={{ color: "#e2f4ff" }}
+                      >
+                        {p}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {fieldError && (
+                <p
+                  data-ocid="registration.error_state"
+                  className="text-xs"
+                  style={{ color: "#ff8080" }}
+                >
+                  {fieldError}
+                </p>
+              )}
+
+              <Button
+                type="submit"
+                data-ocid="registration.submit_button"
+                className="w-full btn-cyan-solid font-montserrat tracking-widest text-xs uppercase mt-2"
+                style={{ height: "44px" }}
+              >
+                Submit Registration <ChevronRight size={14} className="ml-1" />
+              </Button>
+            </form>
+          )}
+
+          {/* LOADING */}
+          {stage === "loading" && (
+            <div
               data-ocid="registration.loading_state"
+              className="flex flex-col items-center py-10 gap-4"
             >
               <Loader2
-                size={28}
+                size={40}
                 className="animate-spin"
                 style={{ color: "#55d6ff" }}
               />
-              <p className="text-sm text-gray-400">
-                Checking registration status...
+              <p
+                className="font-montserrat text-sm tracking-widest uppercase"
+                style={{ color: "rgba(100,180,220,0.7)" }}
+              >
+                {loadingMsg}
               </p>
-            </motion.div>
-          ) : showStatus ? (
-            <motion.div
-              key="status"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-            >
-              <StatusScreen
-                status={
-                  submitted
-                    ? "pending"
-                    : (regStatus!.status as unknown as
-                        | "pending"
-                        | "approved"
-                        | "rejected")
-                }
-                profile={
-                  regStatus ?? {
-                    name: "",
-                    roleTitle: role.title,
-                    email: "",
-                    rejectionReason: undefined,
-                  }
-                }
-                onClose={onClose}
-              />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="form"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-            >
-              <RegistrationForm
-                role={role}
-                onSuccess={() => setSubmitted(true)}
-                existingRoleTitle={
-                  differentRoleRegistered ? regStatus!.roleTitle : undefined
-                }
-              />
-            </motion.div>
+              <p
+                className="text-xs text-center"
+                style={{ color: "rgba(100,180,220,0.45)" }}
+              >
+                Please wait while we securely process your registration.
+              </p>
+            </div>
           )}
-        </AnimatePresence>
-      </motion.div>
-    </motion.div>
+
+          {/* SUCCESS */}
+          {stage === "success" && (
+            <div
+              data-ocid="registration.success_state"
+              className="flex flex-col items-center py-4 gap-5 text-center"
+            >
+              <div
+                className="w-16 h-16 rounded-full flex items-center justify-center"
+                style={{
+                  background: "rgba(0,220,120,0.12)",
+                  border: "2px solid rgba(0,220,120,0.4)",
+                  boxShadow: "0 0 28px rgba(0,220,120,0.2)",
+                }}
+              >
+                <CheckCircle size={34} color="#00dc78" />
+              </div>
+
+              <div>
+                <h3
+                  className="font-montserrat font-black tracking-widest uppercase"
+                  style={{
+                    color: "#00dc78",
+                    fontSize: "clamp(0.75rem, 3vw, 1rem)",
+                    letterSpacing: "0.18em",
+                    textShadow: "0 0 16px rgba(0,220,120,0.45)",
+                  }}
+                >
+                  REGISTRATION SUBMITTED SUCCESSFULLY
+                </h3>
+                <p
+                  className="text-xs mt-1 font-montserrat tracking-widest uppercase"
+                  style={{ color: "rgba(100,180,220,0.55)" }}
+                >
+                  {role.title}
+                </p>
+              </div>
+
+              <div
+                className="w-full p-4 rounded-xl flex items-center justify-between gap-3"
+                style={{
+                  background: "rgba(85,214,255,0.06)",
+                  border: "1px solid rgba(85,214,255,0.25)",
+                }}
+              >
+                <div className="text-left">
+                  <p
+                    className="text-xs font-montserrat tracking-widest uppercase mb-1"
+                    style={{ color: "rgba(85,214,255,0.6)" }}
+                  >
+                    Registration ID
+                  </p>
+                  <code
+                    className="font-bold"
+                    style={{ color: "#55d6ff", fontSize: "0.85rem" }}
+                  >
+                    {regId}
+                  </code>
+                </div>
+                <button
+                  type="button"
+                  onClick={copyRegId}
+                  title="Copy Registration ID"
+                  style={{
+                    background: copied
+                      ? "rgba(0,220,120,0.15)"
+                      : "rgba(85,214,255,0.1)",
+                    border: `1px solid ${copied ? "rgba(0,220,120,0.4)" : "rgba(85,214,255,0.3)"}`,
+                    borderRadius: "8px",
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                    color: copied ? "#00dc78" : "#55d6ff",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Copy size={14} />
+                </button>
+              </div>
+
+              <div
+                className="w-full p-5 rounded-xl text-left"
+                style={{
+                  background: "rgba(0,220,120,0.04)",
+                  border: "1px solid rgba(0,220,120,0.2)",
+                  borderLeft: "3px solid rgba(0,220,120,0.5)",
+                }}
+              >
+                <p
+                  className="text-xs font-montserrat font-bold tracking-widest uppercase mb-3"
+                  style={{ color: "rgba(0,220,120,0.7)" }}
+                >
+                  ✦ Official Acknowledgement
+                </p>
+                <p
+                  className="text-sm leading-relaxed"
+                  style={{
+                    color: "rgba(200,240,220,0.85)",
+                    fontStyle: "italic",
+                    lineHeight: "1.8",
+                  }}
+                >
+                  {greetingMessage}
+                </p>
+              </div>
+
+              <div className="flex gap-3 w-full">
+                <Button
+                  onClick={() => {
+                    onStatusCheck?.(fields.email);
+                    onClose();
+                  }}
+                  data-ocid="registration.secondary_button"
+                  className="flex-1 btn-cyan font-montserrat text-xs tracking-widest uppercase"
+                  style={{ height: "40px" }}
+                >
+                  Check My Status
+                </Button>
+                <Button
+                  onClick={onClose}
+                  data-ocid="registration.close_button"
+                  variant="ghost"
+                  className="flex-1 text-xs"
+                  style={{ color: "rgba(100,180,220,0.5)" }}
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* ERROR */}
+          {stage === "error" && (
+            <div
+              data-ocid="registration.error_state"
+              className="flex flex-col items-center py-6 gap-4 text-center"
+            >
+              <div
+                className="w-16 h-16 rounded-full flex items-center justify-center"
+                style={{
+                  background: "rgba(255,80,80,0.12)",
+                  border: "2px solid rgba(255,80,80,0.35)",
+                }}
+              >
+                <X size={32} color="#ff6060" />
+              </div>
+              <h3 className="font-montserrat font-bold tracking-widest text-white">
+                Submission Failed
+              </h3>
+              <p className="text-xs" style={{ color: "rgba(220,160,160,0.8)" }}>
+                {errMsg}
+              </p>
+              <p className="text-xs" style={{ color: "rgba(160,200,230,0.5)" }}>
+                This error has been logged. Please try again or contact support
+                at contact.adminvicky@myapp.com.
+              </p>
+              <div className="flex gap-3 w-full">
+                <Button
+                  onClick={() => setStage("form")}
+                  data-ocid="registration.primary_button"
+                  className="flex-1 btn-cyan-solid font-montserrat text-xs tracking-widest uppercase"
+                  style={{ height: "40px" }}
+                >
+                  Try Again
+                </Button>
+                <Button
+                  onClick={onClose}
+                  variant="ghost"
+                  data-ocid="registration.cancel_button"
+                  className="flex-1 text-xs"
+                  style={{ color: "rgba(100,180,220,0.5)" }}
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
