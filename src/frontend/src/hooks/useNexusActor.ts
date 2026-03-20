@@ -1,9 +1,6 @@
 /**
  * useNexusActor — creates a raw ICP actor that directly calls ALL custom
  * Nexus IT Portal / EBC Booking Management methods defined in main.mo.
- *
- * This bypasses the auto-generated backend.ts wrapper which only exposes
- * authorization-component methods and does NOT expose our custom methods.
  */
 import { Actor, HttpAgent } from "@icp-sdk/core/agent";
 import type { IDL } from "@icp-sdk/core/candid";
@@ -11,12 +8,10 @@ import { useEffect, useRef, useState } from "react";
 import { loadConfig } from "../config";
 
 export type NexusActor = {
-  // --- Admin Auth ---
   adminLogin(username: string, password: string): Promise<[] | [string]>;
+  ping(): Promise<boolean>;
   verifyAdminToken(token: string): Promise<boolean>;
   logoutAdmin(token: string): Promise<void>;
-
-  // --- Registration ---
   submitRegistration(
     name: string,
     dateOfBirth: string,
@@ -50,8 +45,6 @@ export type NexusActor = {
   ): Promise<void>;
   getFailedLogs(token: string): Promise<FailedLog[]>;
   getRegistrationStats(token: string): Promise<RegistrationStats>;
-
-  // --- Booking ---
   submitBooking(
     roomName: string,
     roomType: string,
@@ -78,8 +71,6 @@ export type NexusActor = {
     reason: string,
   ): Promise<boolean>;
   getBookingStats(token: string): Promise<BookingStats>;
-
-  // --- Service Rating ---
   submitRating(
     bookingId: string,
     roomName: string,
@@ -231,12 +222,7 @@ const BookingRecordIDL = (I: typeof IDL) =>
   });
 
 const BookingStatsIDL = (I: typeof IDL) =>
-  I.Record({
-    total: I.Nat,
-    pending: I.Nat,
-    approved: I.Nat,
-    rejected: I.Nat,
-  });
+  I.Record({ total: I.Nat, pending: I.Nat, approved: I.Nat, rejected: I.Nat });
 
 const ServiceRatingIDL = (I: typeof IDL) =>
   I.Record({
@@ -259,12 +245,10 @@ function nexusIdlFactory({ IDL: I }: { IDL: typeof IDL }): IDL.ServiceClass {
   const Rtg = ServiceRatingIDL(I);
 
   return I.Service({
-    // Admin auth
     adminLogin: I.Func([I.Text, I.Text], [I.Opt(I.Text)], []),
+    ping: I.Func([], [I.Bool], []),
     verifyAdminToken: I.Func([I.Text], [I.Bool], ["query"]),
     logoutAdmin: I.Func([I.Text], [], []),
-
-    // Registration
     submitRegistration: I.Func(
       [I.Text, I.Text, I.Text, I.Text, I.Text, I.Text, I.Text, I.Text],
       [I.Text],
@@ -280,8 +264,6 @@ function nexusIdlFactory({ IDL: I }: { IDL: typeof IDL }): IDL.ServiceClass {
     logFailedRegistration: I.Func([I.Text, I.Text, I.Text, I.Text], [], []),
     getFailedLogs: I.Func([I.Text], [I.Vec(Log)], ["query"]),
     getRegistrationStats: I.Func([I.Text], [Stats], ["query"]),
-
-    // Booking
     submitBooking: I.Func(
       [
         I.Text,
@@ -308,8 +290,6 @@ function nexusIdlFactory({ IDL: I }: { IDL: typeof IDL }): IDL.ServiceClass {
     approveBooking: I.Func([I.Text, I.Text], [I.Bool], []),
     rejectBooking: I.Func([I.Text, I.Text, I.Text], [I.Bool], []),
     getBookingStats: I.Func([I.Text], [BkgStats], ["query"]),
-
-    // Rating
     submitRating: I.Func(
       [I.Text, I.Text, I.Text, I.Text, I.Vec(I.Text), I.Text],
       [I.Text],
@@ -320,11 +300,26 @@ function nexusIdlFactory({ IDL: I }: { IDL: typeof IDL }): IDL.ServiceClass {
   });
 }
 
-// Module-level singleton so actor is created once and reused
 let _actor: NexusActor | null = null;
 let _actorPromise: Promise<NexusActor> | null = null;
+let _canisterReady = false;
+const _readyListeners: Array<(ready: boolean) => void> = [];
 
-async function initNexusActor(): Promise<NexusActor> {
+function notifyReadyListeners(ready: boolean) {
+  _canisterReady = ready;
+  for (const cb of _readyListeners) cb(ready);
+}
+
+export function onCanisterReady(cb: (ready: boolean) => void) {
+  _readyListeners.push(cb);
+  cb(_canisterReady);
+  return () => {
+    const idx = _readyListeners.indexOf(cb);
+    if (idx >= 0) _readyListeners.splice(idx, 1);
+  };
+}
+
+async function buildFreshActor(): Promise<NexusActor> {
   const config = await loadConfig();
   const agent = new HttpAgent({ host: config.backend_host });
   if (config.backend_host?.includes("localhost")) {
@@ -336,21 +331,66 @@ async function initNexusActor(): Promise<NexusActor> {
   }) as unknown as NexusActor;
 }
 
-/** Returns a singleton raw actor for ALL Nexus custom methods. */
+export function resetNexusActor() {
+  _actor = null;
+  _actorPromise = null;
+}
+
+export async function warmUpCanister(
+  maxAttempts = 25,
+  delayMs = 3000,
+): Promise<boolean> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      if (!_actor) {
+        if (!_actorPromise) {
+          _actorPromise = buildFreshActor().catch((e) => {
+            _actorPromise = null;
+            throw e;
+          });
+        }
+        _actor = await _actorPromise;
+      }
+      await _actor.ping();
+      notifyReadyListeners(true);
+      return true;
+    } catch {
+      resetNexusActor();
+      notifyReadyListeners(false);
+      if (i < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+  return false;
+}
+
 export function useNexusActor() {
   const [actor, setActor] = useState<NexusActor | null>(_actor);
-  const [isFetching, setIsFetching] = useState<boolean>(!_actor);
+  const [isFetching, setIsFetching] = useState<boolean>(!_canisterReady);
   const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;
-    if (_actor) {
+
+    if (_canisterReady && _actor) {
       setActor(_actor);
       setIsFetching(false);
       return;
     }
+
+    const unsub = onCanisterReady((ready) => {
+      if (!mountedRef.current) return;
+      if (ready && _actor) {
+        setActor(_actor);
+        setIsFetching(false);
+      } else {
+        setIsFetching(!ready);
+      }
+    });
+
     if (!_actorPromise) {
-      _actorPromise = initNexusActor().catch((e) => {
+      _actorPromise = buildFreshActor().catch((e) => {
         _actorPromise = null;
         throw e;
       });
@@ -358,23 +398,74 @@ export function useNexusActor() {
     _actorPromise
       .then((a) => {
         _actor = a;
-        if (mountedRef.current) {
-          setActor(a);
-          setIsFetching(false);
-        }
+        if (mountedRef.current) setActor(a);
       })
       .catch(() => {
         if (mountedRef.current) setIsFetching(false);
       });
+
     return () => {
       mountedRef.current = false;
+      unsub();
     };
   }, []);
 
   return { actor, isFetching };
 }
 
-/** Helper: unwrap Candid optional [T] | [] => T | null */
+/**
+ * robustCall — retries with uniform 3s delays for up to ~60 seconds.
+ * onRetry receives: (attempt, totalAttempts, secondsElapsed)
+ */
+export async function robustCall<T>(
+  fn: (actor: NexusActor) => Promise<T>,
+  maxRetries = 20,
+  onRetry?: (
+    attempt: number,
+    totalAttempts: number,
+    secondsElapsed: number,
+  ) => void,
+): Promise<T> {
+  const DELAY = 3000;
+  const startTs = Date.now();
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (!_actor) {
+      _actorPromise = buildFreshActor().catch((e) => {
+        _actorPromise = null;
+        throw e;
+      });
+      try {
+        _actor = await _actorPromise;
+      } catch (e) {
+        lastError = e;
+        if (attempt < maxRetries) {
+          const elapsed = Math.floor((Date.now() - startTs) / 1000);
+          onRetry?.(attempt + 1, maxRetries + 1, elapsed);
+          await new Promise((r) => setTimeout(r, DELAY));
+        }
+        continue;
+      }
+    }
+    try {
+      const result = await fn(_actor);
+      notifyReadyListeners(true);
+      return result;
+    } catch (err) {
+      lastError = err;
+      resetNexusActor();
+      notifyReadyListeners(false);
+      if (attempt < maxRetries) {
+        const elapsed = Math.floor((Date.now() - startTs) / 1000);
+        onRetry?.(attempt + 1, maxRetries + 1, elapsed);
+        await new Promise((r) => setTimeout(r, DELAY));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export function unwrapOpt<T>(opt: [] | [T] | null | undefined): T | null {
   if (!opt) return null;
   if (Array.isArray(opt)) return opt.length > 0 ? (opt[0] as T) : null;

@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import type { BookingRecord, ServiceRating } from "../hooks/useNexusActor";
 import { useNexusActor } from "../hooks/useNexusActor";
+import { FeedbackModal } from "./FeedbackModal";
 
 const RATING_OPTIONS = [
   "Room was clean and well-maintained",
@@ -410,6 +411,8 @@ export function UserBookingDashboard({ onClose }: Props) {
     "submitted" | "approved" | "rejected" | "rating"
   >("submitted");
   const [error, setError] = useState("");
+  const [pendingFeedbackBooking, setPendingFeedbackBooking] =
+    useState<BookingRecord | null>(null);
 
   async function loadData(emailVal: string) {
     if (!actor) {
@@ -426,6 +429,12 @@ export function UserBookingDashboard({ onClose }: Props) {
       ]);
       setBookings(bks);
       setRatings(rts);
+      const firstPending = bks.find(
+        (b) =>
+          "approved" in b.status &&
+          !localStorage.getItem(`nexus_feedback_${b.id}`),
+      );
+      if (firstPending) setPendingFeedbackBooking(firstPending);
       setSubmitted(true);
     } catch {
       setError("Failed to load data. Please try again.");
@@ -463,254 +472,357 @@ export function UserBookingDashboard({ onClose }: Props) {
   ];
 
   return (
-    <div
-      className="fixed inset-0 z-50 overflow-y-auto"
-      style={{
-        background:
-          "linear-gradient(160deg, #040d16 0%, #071628 40%, #050e1a 70%, #040d16 100%)",
-      }}
-    >
-      {/* Header */}
+    <>
+      {pendingFeedbackBooking && (
+        <FeedbackModal
+          bookingId={pendingFeedbackBooking.id}
+          roomName={pendingFeedbackBooking.roomName}
+          bookerName={pendingFeedbackBooking.bookerName}
+          email={pendingFeedbackBooking.email}
+          onComplete={() => {
+            localStorage.setItem(
+              `nexus_feedback_${pendingFeedbackBooking.id}`,
+              "submitted",
+            );
+            const next = bookings.find(
+              (b) =>
+                "approved" in b.status &&
+                b.id !== pendingFeedbackBooking.id &&
+                !localStorage.getItem(`nexus_feedback_${b.id}`),
+            );
+            setPendingFeedbackBooking(next ?? null);
+          }}
+        />
+      )}
       <div
-        className="sticky top-0 z-10 flex items-center justify-between px-6 py-4"
+        className="fixed inset-0 z-50 overflow-y-auto"
         style={{
-          background: "rgba(4,13,22,0.95)",
-          borderBottom: "1px solid rgba(85,214,255,0.15)",
-          backdropFilter: "blur(12px)",
+          background:
+            "linear-gradient(160deg, #040d16 0%, #071628 40%, #050e1a 70%, #040d16 100%)",
         }}
       >
-        <div className="flex items-center gap-3">
-          <div style={{ filter: "drop-shadow(0 0 8px rgba(85,214,255,0.3))" }}>
-            <Star size={20} color="#fbbf24" fill="rgba(251,191,36,0.3)" />
-          </div>
-          <div>
-            <h1
-              className="font-montserrat font-black text-sm tracking-widest uppercase"
-              style={{ color: "#55d6ff", letterSpacing: "0.2em" }}
-            >
-              MY BOOKING DASHBOARD
-            </h1>
-            <p
-              className="text-xs font-montserrat tracking-widest"
-              style={{
-                color: "rgba(85,214,255,0.4)",
-                fontSize: "0.55rem",
-                letterSpacing: "0.2em",
-              }}
-            >
-              EBC BOOKING MANAGEMENT SYSTEM
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          data-ocid="user_dashboard.close_button"
-          className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-          style={{ color: "rgba(85,214,255,0.7)" }}
+        {/* Header */}
+        <div
+          className="sticky top-0 z-10 flex items-center justify-between px-6 py-4"
+          style={{
+            background: "rgba(4,13,22,0.95)",
+            borderBottom: "1px solid rgba(85,214,255,0.15)",
+            backdropFilter: "blur(12px)",
+          }}
         >
-          <X size={20} />
-        </button>
-      </div>
-
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        {/* Email search */}
-        {!submitted ? (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="max-w-md mx-auto"
-          >
+          <div className="flex items-center gap-3">
             <div
-              className="rounded-2xl p-8"
-              style={{
-                background:
-                  "linear-gradient(135deg, rgba(8,22,36,0.92) 0%, rgba(12,28,42,0.88) 100%)",
-                border: "1px solid rgba(85,214,255,0.22)",
-              }}
+              style={{ filter: "drop-shadow(0 0 8px rgba(85,214,255,0.3))" }}
             >
-              <h2
-                className="font-montserrat font-black text-base tracking-widest uppercase mb-2"
-                style={{ color: "#55d6ff" }}
+              <Star size={20} color="#fbbf24" fill="rgba(251,191,36,0.3)" />
+            </div>
+            <div>
+              <h1
+                className="font-montserrat font-black text-sm tracking-widest uppercase"
+                style={{ color: "#55d6ff", letterSpacing: "0.2em" }}
               >
-                ACCESS YOUR DASHBOARD
-              </h2>
+                MY BOOKING DASHBOARD
+              </h1>
               <p
-                className="text-xs mb-6"
-                style={{ color: "rgba(100,180,220,0.55)" }}
-              >
-                Enter your official email to view your bookings and ratings
-              </p>
-              <form onSubmit={handleSearch} className="space-y-4">
-                <div>
-                  <label
-                    htmlFor="dash-email"
-                    className="block text-xs font-montserrat font-bold tracking-widest uppercase mb-2"
-                    style={{ color: "rgba(85,214,255,0.7)" }}
-                  >
-                    Official Email ID
-                  </label>
-                  <input
-                    id="dash-email"
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
-                    style={{
-                      background: "rgba(12,28,42,0.8)",
-                      border: "1px solid rgba(85,214,255,0.22)",
-                      color: "#e2f4ff",
-                    }}
-                    placeholder="official@company.com"
-                    data-ocid="user_dashboard.input"
-                  />
-                </div>
-                {error && (
-                  <p
-                    className="text-xs"
-                    style={{ color: "#ff8080" }}
-                    data-ocid="user_dashboard.error_state"
-                  >
-                    {error}
-                  </p>
-                )}
-                <button
-                  type="submit"
-                  disabled={loading}
-                  data-ocid="user_dashboard.submit_button"
-                  className="w-full py-3 rounded-xl font-montserrat font-black text-xs tracking-widest uppercase"
-                  style={{
-                    background: "rgba(85,214,255,0.15)",
-                    border: "1px solid rgba(85,214,255,0.4)",
-                    color: "#55d6ff",
-                  }}
-                >
-                  {loading ? "Loading..." : "ACCESS MY DASHBOARD"}
-                </button>
-              </form>
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="space-y-6"
-          >
-            {/* Email + change */}
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <p className="text-sm" style={{ color: "rgba(100,180,220,0.7)" }}>
-                Showing data for:{" "}
-                <span style={{ color: "#55d6ff" }}>{email}</span>
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setSubmitted(false);
-                  setBookings([]);
-                  setRatings([]);
-                }}
-                className="text-xs font-montserrat font-bold tracking-widest uppercase px-3 py-1.5 rounded-lg"
+                className="text-xs font-montserrat tracking-widest"
                 style={{
-                  background: "rgba(85,214,255,0.08)",
-                  border: "1px solid rgba(85,214,255,0.2)",
-                  color: "rgba(85,214,255,0.7)",
+                  color: "rgba(85,214,255,0.4)",
+                  fontSize: "0.55rem",
+                  letterSpacing: "0.2em",
                 }}
               >
-                CHANGE EMAIL
-              </button>
+                EBC BOOKING MANAGEMENT SYSTEM
+              </p>
             </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            data-ocid="user_dashboard.close_button"
+            className="p-2 rounded-lg hover:bg-white/5 transition-colors"
+            style={{ color: "rgba(85,214,255,0.7)" }}
+          >
+            <X size={20} />
+          </button>
+        </div>
 
-            {/* Tabs */}
-            <div className="flex flex-wrap gap-2">
-              {TABS.map((tab) => (
+        <div className="max-w-4xl mx-auto px-4 py-8">
+          {/* Email search */}
+          {!submitted ? (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="max-w-md mx-auto"
+            >
+              <div
+                className="rounded-2xl p-8"
+                style={{
+                  background:
+                    "linear-gradient(135deg, rgba(8,22,36,0.92) 0%, rgba(12,28,42,0.88) 100%)",
+                  border: "1px solid rgba(85,214,255,0.22)",
+                }}
+              >
+                <h2
+                  className="font-montserrat font-black text-base tracking-widest uppercase mb-2"
+                  style={{ color: "#55d6ff" }}
+                >
+                  ACCESS YOUR DASHBOARD
+                </h2>
+                <p
+                  className="text-xs mb-6"
+                  style={{ color: "rgba(100,180,220,0.55)" }}
+                >
+                  Enter your official email to view your bookings and ratings
+                </p>
+                <form onSubmit={handleSearch} className="space-y-4">
+                  <div>
+                    <label
+                      htmlFor="dash-email"
+                      className="block text-xs font-montserrat font-bold tracking-widest uppercase mb-2"
+                      style={{ color: "rgba(85,214,255,0.7)" }}
+                    >
+                      Official Email ID
+                    </label>
+                    <input
+                      id="dash-email"
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
+                      style={{
+                        background: "rgba(12,28,42,0.8)",
+                        border: "1px solid rgba(85,214,255,0.22)",
+                        color: "#e2f4ff",
+                      }}
+                      placeholder="official@company.com"
+                      data-ocid="user_dashboard.input"
+                    />
+                  </div>
+                  {error && (
+                    <p
+                      className="text-xs"
+                      style={{ color: "#ff8080" }}
+                      data-ocid="user_dashboard.error_state"
+                    >
+                      {error}
+                    </p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    data-ocid="user_dashboard.submit_button"
+                    className="w-full py-3 rounded-xl font-montserrat font-black text-xs tracking-widest uppercase"
+                    style={{
+                      background: "rgba(85,214,255,0.15)",
+                      border: "1px solid rgba(85,214,255,0.4)",
+                      color: "#55d6ff",
+                    }}
+                  >
+                    {loading ? "Loading..." : "ACCESS MY DASHBOARD"}
+                  </button>
+                </form>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="space-y-6"
+            >
+              {/* Email + change */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <p
+                  className="text-sm"
+                  style={{ color: "rgba(100,180,220,0.7)" }}
+                >
+                  Showing data for:{" "}
+                  <span style={{ color: "#55d6ff" }}>{email}</span>
+                </p>
                 <button
-                  key={tab.id}
                   type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  data-ocid={`user_dashboard.${tab.id}.tab`}
-                  className="px-4 py-2 rounded-xl font-montserrat font-bold text-xs tracking-widest uppercase transition-all"
+                  onClick={() => {
+                    setSubmitted(false);
+                    setBookings([]);
+                    setRatings([]);
+                  }}
+                  className="text-xs font-montserrat font-bold tracking-widest uppercase px-3 py-1.5 rounded-lg"
                   style={{
-                    background:
-                      activeTab === tab.id ? `${tab.color}22` : "transparent",
-                    border: `1px solid ${activeTab === tab.id ? `${tab.color}55` : "rgba(85,214,255,0.12)"}`,
-                    color:
-                      activeTab === tab.id
-                        ? tab.color
-                        : "rgba(100,180,220,0.5)",
+                    background: "rgba(85,214,255,0.08)",
+                    border: "1px solid rgba(85,214,255,0.2)",
+                    color: "rgba(85,214,255,0.7)",
                   }}
                 >
-                  {tab.label}
+                  CHANGE EMAIL
                 </button>
-              ))}
-            </div>
+              </div>
 
-            {/* Panel content */}
-            <AnimatePresence mode="wait">
-              {activeTab === "submitted" && (
-                <motion.div
-                  key="submitted"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="space-y-4"
-                >
-                  <SectionHeader
-                    title="SUBMITTED REQUESTS"
-                    count={bookings.length}
-                    color="#55d6ff"
-                  />
-                  {bookings.length === 0 ? (
-                    <EmptyState
-                      message="No booking requests found."
-                      data-ocid="user_dashboard.submitted.empty_state"
+              {/* Tabs */}
+              <div className="flex flex-wrap gap-2">
+                {TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    data-ocid={`user_dashboard.${tab.id}.tab`}
+                    className="px-4 py-2 rounded-xl font-montserrat font-bold text-xs tracking-widest uppercase transition-all"
+                    style={{
+                      background:
+                        activeTab === tab.id ? `${tab.color}22` : "transparent",
+                      border: `1px solid ${activeTab === tab.id ? `${tab.color}55` : "rgba(85,214,255,0.12)"}`,
+                      color:
+                        activeTab === tab.id
+                          ? tab.color
+                          : "rgba(100,180,220,0.5)",
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Panel content */}
+              <AnimatePresence mode="wait">
+                {activeTab === "submitted" && (
+                  <motion.div
+                    key="submitted"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="space-y-4"
+                  >
+                    <SectionHeader
+                      title="SUBMITTED REQUESTS"
+                      count={bookings.length}
+                      color="#55d6ff"
                     />
-                  ) : (
-                    bookings.map((b, i) => {
-                      const st = getStatus(b);
-                      const ss = STATUS_STYLE[st];
-                      return (
+                    {bookings.length === 0 ? (
+                      <EmptyState
+                        message="No booking requests found."
+                        data-ocid="user_dashboard.submitted.empty_state"
+                      />
+                    ) : (
+                      bookings.map((b, i) => {
+                        const st = getStatus(b);
+                        const ss = STATUS_STYLE[st];
+                        return (
+                          <div
+                            key={b.id}
+                            data-ocid={`user_dashboard.submitted.item.${i + 1}`}
+                            className="rounded-xl p-5"
+                            style={{
+                              background:
+                                "linear-gradient(135deg, rgba(8,22,36,0.92) 0%, rgba(12,28,42,0.88) 100%)",
+                              border: "1px solid rgba(85,214,255,0.15)",
+                            }}
+                          >
+                            <div className="flex items-start justify-between flex-wrap gap-3">
+                              <div>
+                                <p className="font-montserrat font-bold text-base text-white">
+                                  {b.roomName}
+                                </p>
+                                <span
+                                  className="inline-block text-xs font-montserrat tracking-widest uppercase px-2 py-0.5 rounded mt-1"
+                                  style={{
+                                    background: "rgba(85,214,255,0.1)",
+                                    color: "#55d6ff",
+                                    border: "1px solid rgba(85,214,255,0.2)",
+                                  }}
+                                >
+                                  {b.roomType === "conference"
+                                    ? "CONFERENCE"
+                                    : "DINING"}
+                                </span>
+                              </div>
+                              <span
+                                className="text-xs font-montserrat font-bold tracking-widest uppercase px-2.5 py-1 rounded-full"
+                                style={{
+                                  background: ss.bg,
+                                  border: `1px solid ${ss.border}`,
+                                  color: ss.color,
+                                }}
+                              >
+                                {ss.label}
+                              </span>
+                            </div>
+                            <div
+                              className="flex items-center gap-4 mt-3 text-xs"
+                              style={{ color: "rgba(140,190,220,0.6)" }}
+                            >
+                              <span className="flex items-center gap-1">
+                                <CalendarDays size={12} />
+                                {b.bookingDate}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Clock size={12} />
+                                {b.bookingHour}:{b.bookingMinute}
+                              </span>
+                            </div>
+                            <p
+                              className="text-xs mt-2"
+                              style={{ color: "rgba(140,190,220,0.5)" }}
+                            >
+                              Purpose: {b.purpose}
+                            </p>
+                          </div>
+                        );
+                      })
+                    )}
+                  </motion.div>
+                )}
+
+                {activeTab === "approved" && (
+                  <motion.div
+                    key="approved"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="space-y-4"
+                  >
+                    <SectionHeader
+                      title="APPROVED BOOKINGS"
+                      count={approved.length}
+                      color="#00dc78"
+                    />
+                    {approved.length === 0 ? (
+                      <EmptyState
+                        message="No approved bookings yet."
+                        data-ocid="user_dashboard.approved.empty_state"
+                      />
+                    ) : (
+                      approved.map((b, i) => (
                         <div
                           key={b.id}
-                          data-ocid={`user_dashboard.submitted.item.${i + 1}`}
+                          data-ocid={`user_dashboard.approved.item.${i + 1}`}
                           className="rounded-xl p-5"
                           style={{
-                            background:
-                              "linear-gradient(135deg, rgba(8,22,36,0.92) 0%, rgba(12,28,42,0.88) 100%)",
-                            border: "1px solid rgba(85,214,255,0.15)",
+                            background: "rgba(0,220,120,0.04)",
+                            border: "1px solid rgba(0,220,120,0.25)",
                           }}
                         >
                           <div className="flex items-start justify-between flex-wrap gap-3">
-                            <div>
-                              <p className="font-montserrat font-bold text-base text-white">
-                                {b.roomName}
-                              </p>
-                              <span
-                                className="inline-block text-xs font-montserrat tracking-widest uppercase px-2 py-0.5 rounded mt-1"
-                                style={{
-                                  background: "rgba(85,214,255,0.1)",
-                                  color: "#55d6ff",
-                                  border: "1px solid rgba(85,214,255,0.2)",
-                                }}
-                              >
-                                {b.roomType === "conference"
-                                  ? "CONFERENCE"
-                                  : "DINING"}
-                              </span>
-                            </div>
+                            <p className="font-montserrat font-bold text-base text-white">
+                              {b.roomName}
+                            </p>
                             <span
                               className="text-xs font-montserrat font-bold tracking-widest uppercase px-2.5 py-1 rounded-full"
                               style={{
-                                background: ss.bg,
-                                border: `1px solid ${ss.border}`,
-                                color: ss.color,
+                                background: "rgba(0,220,120,0.12)",
+                                border: "1px solid rgba(0,220,120,0.3)",
+                                color: "#00dc78",
                               }}
                             >
-                              {ss.label}
+                              APPROVED
                             </span>
                           </div>
+                          <p
+                            className="text-xs mt-2 font-mono"
+                            style={{ color: "rgba(0,220,120,0.7)" }}
+                          >
+                            Ref: {b.approvedBookingId ?? b.id}
+                          </p>
                           <div
-                            className="flex items-center gap-4 mt-3 text-xs"
+                            className="flex items-center gap-4 mt-2 text-xs"
                             style={{ color: "rgba(140,190,220,0.6)" }}
                           >
                             <span className="flex items-center gap-1">
@@ -722,185 +834,110 @@ export function UserBookingDashboard({ onClose }: Props) {
                               {b.bookingHour}:{b.bookingMinute}
                             </span>
                           </div>
-                          <p
-                            className="text-xs mt-2"
-                            style={{ color: "rgba(140,190,220,0.5)" }}
-                          >
-                            Purpose: {b.purpose}
-                          </p>
-                        </div>
-                      );
-                    })
-                  )}
-                </motion.div>
-              )}
-
-              {activeTab === "approved" && (
-                <motion.div
-                  key="approved"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="space-y-4"
-                >
-                  <SectionHeader
-                    title="APPROVED BOOKINGS"
-                    count={approved.length}
-                    color="#00dc78"
-                  />
-                  {approved.length === 0 ? (
-                    <EmptyState
-                      message="No approved bookings yet."
-                      data-ocid="user_dashboard.approved.empty_state"
-                    />
-                  ) : (
-                    approved.map((b, i) => (
-                      <div
-                        key={b.id}
-                        data-ocid={`user_dashboard.approved.item.${i + 1}`}
-                        className="rounded-xl p-5"
-                        style={{
-                          background: "rgba(0,220,120,0.04)",
-                          border: "1px solid rgba(0,220,120,0.25)",
-                        }}
-                      >
-                        <div className="flex items-start justify-between flex-wrap gap-3">
-                          <p className="font-montserrat font-bold text-base text-white">
-                            {b.roomName}
-                          </p>
-                          <span
-                            className="text-xs font-montserrat font-bold tracking-widest uppercase px-2.5 py-1 rounded-full"
+                          <div
+                            className="mt-3 p-4 rounded-xl"
                             style={{
-                              background: "rgba(0,220,120,0.12)",
-                              border: "1px solid rgba(0,220,120,0.3)",
-                              color: "#00dc78",
+                              background: "rgba(0,220,120,0.05)",
+                              border: "1px solid rgba(0,220,120,0.15)",
                             }}
                           >
-                            APPROVED
-                          </span>
+                            <ApprovalGreeting b={b} />
+                          </div>
                         </div>
-                        <p
-                          className="text-xs mt-2 font-mono"
-                          style={{ color: "rgba(0,220,120,0.7)" }}
-                        >
-                          Ref: {b.approvedBookingId ?? b.id}
-                        </p>
-                        <div
-                          className="flex items-center gap-4 mt-2 text-xs"
-                          style={{ color: "rgba(140,190,220,0.6)" }}
-                        >
-                          <span className="flex items-center gap-1">
-                            <CalendarDays size={12} />
-                            {b.bookingDate}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Clock size={12} />
-                            {b.bookingHour}:{b.bookingMinute}
-                          </span>
-                        </div>
-                        <div
-                          className="mt-3 p-4 rounded-xl"
-                          style={{
-                            background: "rgba(0,220,120,0.05)",
-                            border: "1px solid rgba(0,220,120,0.15)",
-                          }}
-                        >
-                          <ApprovalGreeting b={b} />
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </motion.div>
-              )}
+                      ))
+                    )}
+                  </motion.div>
+                )}
 
-              {activeTab === "rejected" && (
-                <motion.div
-                  key="rejected"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="space-y-4"
-                >
-                  <SectionHeader
-                    title="REJECTED BOOKINGS"
-                    count={rejected.length}
-                    color="#ff6060"
-                  />
-                  {rejected.length === 0 ? (
-                    <EmptyState
-                      message="No rejected bookings."
-                      data-ocid="user_dashboard.rejected.empty_state"
+                {activeTab === "rejected" && (
+                  <motion.div
+                    key="rejected"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="space-y-4"
+                  >
+                    <SectionHeader
+                      title="REJECTED BOOKINGS"
+                      count={rejected.length}
+                      color="#ff6060"
                     />
-                  ) : (
-                    rejected.map((b, i) => (
-                      <div
-                        key={b.id}
-                        data-ocid={`user_dashboard.rejected.item.${i + 1}`}
-                        className="rounded-xl p-5"
-                        style={{
-                          background: "rgba(255,80,80,0.04)",
-                          border: "1px solid rgba(255,80,80,0.2)",
-                        }}
-                      >
-                        <div className="flex items-start justify-between flex-wrap gap-3">
-                          <p className="font-montserrat font-bold text-base text-white">
-                            {b.roomName}
-                          </p>
-                          <span
-                            className="text-xs font-montserrat font-bold tracking-widest uppercase px-2.5 py-1 rounded-full"
-                            style={{
-                              background: "rgba(255,80,80,0.12)",
-                              border: "1px solid rgba(255,80,80,0.3)",
-                              color: "#ff6060",
-                            }}
-                          >
-                            REJECTED
-                          </span>
-                        </div>
+                    {rejected.length === 0 ? (
+                      <EmptyState
+                        message="No rejected bookings."
+                        data-ocid="user_dashboard.rejected.empty_state"
+                      />
+                    ) : (
+                      rejected.map((b, i) => (
                         <div
-                          className="flex items-center gap-4 mt-2 text-xs"
-                          style={{ color: "rgba(140,190,220,0.6)" }}
-                        >
-                          <span className="flex items-center gap-1">
-                            <CalendarDays size={12} />
-                            {b.bookingDate}
-                          </span>
-                        </div>
-                        <div
-                          className="mt-3 p-4 rounded-xl"
+                          key={b.id}
+                          data-ocid={`user_dashboard.rejected.item.${i + 1}`}
+                          className="rounded-xl p-5"
                           style={{
                             background: "rgba(255,80,80,0.04)",
-                            border: "1px solid rgba(255,80,80,0.1)",
+                            border: "1px solid rgba(255,80,80,0.2)",
                           }}
                         >
-                          <RejectionMsg b={b} />
+                          <div className="flex items-start justify-between flex-wrap gap-3">
+                            <p className="font-montserrat font-bold text-base text-white">
+                              {b.roomName}
+                            </p>
+                            <span
+                              className="text-xs font-montserrat font-bold tracking-widest uppercase px-2.5 py-1 rounded-full"
+                              style={{
+                                background: "rgba(255,80,80,0.12)",
+                                border: "1px solid rgba(255,80,80,0.3)",
+                                color: "#ff6060",
+                              }}
+                            >
+                              REJECTED
+                            </span>
+                          </div>
+                          <div
+                            className="flex items-center gap-4 mt-2 text-xs"
+                            style={{ color: "rgba(140,190,220,0.6)" }}
+                          >
+                            <span className="flex items-center gap-1">
+                              <CalendarDays size={12} />
+                              {b.bookingDate}
+                            </span>
+                          </div>
+                          <div
+                            className="mt-3 p-4 rounded-xl"
+                            style={{
+                              background: "rgba(255,80,80,0.04)",
+                              border: "1px solid rgba(255,80,80,0.1)",
+                            }}
+                          >
+                            <RejectionMsg b={b} />
+                          </div>
                         </div>
-                      </div>
-                    ))
-                  )}
-                </motion.div>
-              )}
+                      ))
+                    )}
+                  </motion.div>
+                )}
 
-              {activeTab === "rating" && (
-                <motion.div
-                  key="rating"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                >
-                  <RatingPanel
-                    approvedBookings={approved}
-                    existingRatings={ratings}
-                    email={email}
-                    onRated={() => loadData(email)}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
-        )}
+                {activeTab === "rating" && (
+                  <motion.div
+                    key="rating"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                  >
+                    <RatingPanel
+                      approvedBookings={approved}
+                      existingRatings={ratings}
+                      email={email}
+                      onRated={() => loadData(email)}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

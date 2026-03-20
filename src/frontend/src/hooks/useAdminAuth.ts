@@ -1,80 +1,96 @@
-import { useCallback, useEffect, useState } from "react";
-import { unwrapOpt, useNexusActor } from "./useNexusActor";
+import { useEffect, useState } from "react";
+import { resetNexusActor, robustCall } from "./useNexusActor";
 
-const TOKEN_KEY = "nexus_admin_token";
+const STORAGE_KEY = "nexus_admin_token";
+
+// Shared state so all consumers re-render when auth changes
+let _isAdmin = false;
+let _token: string | null = null;
+const _listeners: Array<() => void> = [];
+
+function notify() {
+  for (const cb of _listeners) cb();
+}
+
+function loadFromStorage(): string | null {
+  try {
+    return sessionStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveToStorage(token: string | null) {
+  try {
+    if (token) sessionStorage.setItem(STORAGE_KEY, token);
+    else sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+// Initialize from storage on module load
+const storedToken = loadFromStorage();
+if (storedToken) {
+  _token = storedToken;
+  _isAdmin = true;
+}
 
 export function useAdminAuth() {
-  const { actor, isFetching } = useNexusActor();
-  const [token, setToken] = useState<string | null>(() =>
-    localStorage.getItem(TOKEN_KEY),
-  );
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isVerifying, setIsVerifying] = useState(true);
+  const [state, setState] = useState({ isAdmin: _isAdmin, token: _token });
 
   useEffect(() => {
-    if (isFetching || !actor) return;
-    const stored = localStorage.getItem(TOKEN_KEY);
-    if (!stored) {
-      setIsAdmin(false);
-      setIsVerifying(false);
-      return;
+    const cb = () => setState({ isAdmin: _isAdmin, token: _token });
+    _listeners.push(cb);
+    // Verify stored token is still valid
+    if (_token) {
+      const t = _token;
+      robustCall((actor) => actor.verifyAdminToken(t), 3)
+        .then((valid) => {
+          if (!valid) {
+            _isAdmin = false;
+            _token = null;
+            saveToStorage(null);
+            notify();
+          }
+        })
+        .catch(() => {
+          // Keep existing auth state on network error — don't log out
+        });
     }
-    actor
-      .verifyAdminToken(stored)
-      .then((valid) => {
-        if (valid) {
-          setToken(stored);
-          setIsAdmin(true);
-        } else {
-          localStorage.removeItem(TOKEN_KEY);
-          setToken(null);
-          setIsAdmin(false);
-        }
-      })
-      .catch(() => {
-        setIsAdmin(false);
-      })
-      .finally(() => {
-        setIsVerifying(false);
-      });
-  }, [actor, isFetching]);
+    return () => {
+      const idx = _listeners.indexOf(cb);
+      if (idx >= 0) _listeners.splice(idx, 1);
+    };
+  }, []);
 
-  const login = useCallback(
-    async (
-      username: string,
-      password: string,
-    ): Promise<boolean | "no_actor"> => {
-      if (!actor) return "no_actor";
-      try {
-        const raw = await actor.adminLogin(username, password);
-        const tokenValue = unwrapOpt(raw);
-        if (tokenValue) {
-          localStorage.setItem(TOKEN_KEY, tokenValue);
-          setToken(tokenValue);
-          setIsAdmin(true);
-          return true;
-        }
-        return false;
-      } catch (err) {
-        console.error("adminLogin error:", err);
-        throw err;
-      }
-    },
-    [actor],
-  );
+  function loginWithToken(token: string) {
+    _token = token;
+    _isAdmin = true;
+    saveToStorage(token);
+    notify();
+  }
 
-  const logout = useCallback(async () => {
-    if (actor && token) {
-      try {
-        await actor.logoutAdmin(token);
-      } catch (_) {
-        // ignore
-      }
+  function logout() {
+    if (_token) {
+      robustCall((actor) => actor.logoutAdmin(_token!), 1).catch(() => {});
     }
-    localStorage.removeItem(TOKEN_KEY);
-    setToken(null);
-    setIsAdmin(false);
-  }, [actor, token]);
+    _token = null;
+    _isAdmin = false;
+    saveToStorage(null);
+    resetNexusActor();
+    notify();
+  }
 
-  return { token, isAdmin, isVerifying, isFetching, login, logout };
+  function getToken() {
+    return state.token;
+  }
+
+  return {
+    isAdmin: state.isAdmin,
+    isFetching: false,
+    getToken,
+    loginWithToken,
+    logout,
+  };
 }

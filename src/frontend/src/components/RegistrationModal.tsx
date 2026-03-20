@@ -11,7 +11,7 @@ import {
 import { CheckCircle, ChevronRight, Copy, Loader2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { RoleDef } from "../App";
-import { useNexusActor } from "../hooks/useNexusActor";
+import { robustCall } from "../hooks/useNexusActor";
 
 const PURPOSES = [
   "IT Infrastructure Management",
@@ -60,32 +60,37 @@ function initFields(): Fields {
 }
 
 export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
-  const { actor, isFetching } = useNexusActor();
-  const actorRef = useRef(actor);
-  useEffect(() => {
-    actorRef.current = actor;
-  }, [actor]);
-
   const [fields, setFields] = useState<Fields>(initFields);
   const [stage, setStage] = useState<Stage>("form");
   const [regId, setRegId] = useState("");
   const [errMsg, setErrMsg] = useState("");
-  const [loadingMsg, setLoadingMsg] = useState("Submitting Registration...");
   const [fieldError, setFieldError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number>(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (stage === "loading") {
+      startRef.current = Date.now();
+      setElapsed(0);
+      timerRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [stage]);
+
+  const MAX_WAIT = 65;
+  const remaining = Math.max(0, MAX_WAIT - elapsed);
+  const progress = Math.min(100, (elapsed / MAX_WAIT) * 100);
 
   function set(k: keyof Fields) {
     return (v: string) => setFields((p) => ({ ...p, [k]: v }));
-  }
-
-  async function waitForActor(maxWaitMs = 20000) {
-    if (actorRef.current) return actorRef.current;
-    const start = Date.now();
-    while (Date.now() - start < maxWaitMs) {
-      await new Promise((r) => setTimeout(r, 600));
-      if (actorRef.current) return actorRef.current;
-    }
-    return null;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -97,69 +102,54 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
     }
     setFieldError("");
     setStage("loading");
-    setLoadingMsg("Connecting to server...");
     setErrMsg("");
 
-    const nb = await waitForActor();
-    if (!nb) {
-      setErrMsg(
-        "Cannot reach server. Please check your internet connection and try again.",
-      );
-      setStage("error");
-      return;
-    }
-
-    setLoadingMsg("Submitting your registration...");
     const deviceInfo = `${navigator.userAgent} | ${navigator.language} | ${screen.width}x${screen.height}`;
 
-    const attempt = () =>
-      nb.submitRegistration(
-        fields.name.trim(),
-        fields.dob,
-        fields.email.trim().toLowerCase(),
-        fields.mobile.trim(),
-        fields.country.trim(),
-        role.title,
-        fields.purpose,
-        deviceInfo,
-      );
-
     try {
-      const id = await attempt();
-      if (!id || id.trim() === "") throw new Error("Server returned empty ID.");
+      const id = await robustCall(
+        (actor) =>
+          actor.submitRegistration(
+            fields.name.trim(),
+            fields.dob,
+            fields.email.trim().toLowerCase(),
+            fields.mobile.trim(),
+            fields.country.trim(),
+            role.title,
+            fields.purpose,
+            deviceInfo,
+          ),
+        20,
+      );
+      if (!id || id.trim() === "") throw new Error("Empty ID returned.");
       localStorage.setItem(
         `nexus_reg_${fields.email.trim().toLowerCase()}`,
         id,
       );
       setRegId(id);
       setStage("success");
-    } catch (_e1) {
-      setLoadingMsg("Retrying...");
-      await new Promise((r) => setTimeout(r, 2500));
-      try {
-        const id = await attempt();
-        if (!id || id.trim() === "")
-          throw new Error("Server returned empty ID.");
-        localStorage.setItem(
-          `nexus_reg_${fields.email.trim().toLowerCase()}`,
-          id,
+    } catch (e) {
+      const rawMsg = e instanceof Error ? e.message : String(e);
+      if (
+        rawMsg.toLowerCase().includes("stopped") ||
+        rawMsg.includes("IC0508")
+      ) {
+        setErrMsg(
+          "Server is temporarily offline. Please wait 1 minute and try again.",
         );
-        setRegId(id);
-        setStage("success");
-      } catch (e2) {
-        const msg =
-          e2 instanceof Error
-            ? e2.message
-            : "Submission failed. Please try again.";
-        nb.logFailedRegistration(
-          fields.email.trim(),
-          role.title,
-          msg,
-          deviceInfo,
-        ).catch(() => {});
-        setErrMsg(msg);
-        setStage("error");
+      } else if (
+        rawMsg.toLowerCase().includes("network") ||
+        rawMsg.toLowerCase().includes("fetch")
+      ) {
+        setErrMsg(
+          "Network error. Please check your internet connection and try again.",
+        );
+      } else {
+        setErrMsg(
+          "Registration could not be submitted. Please wait 30 seconds and try again.",
+        );
       }
+      setStage("error");
     }
   }
 
@@ -202,115 +192,160 @@ Corporate Administration Team`;
         <button
           type="button"
           onClick={onClose}
-          data-ocid="registration.close_button"
           className="absolute top-5 right-5 opacity-50 hover:opacity-100 transition-opacity"
           aria-label="Close"
         >
           <X size={18} color="#55d6ff" />
         </button>
 
+        {/* Header */}
         <div
           className="px-8 pt-8 pb-5"
-          style={{ borderBottom: "1px solid rgba(85,214,255,0.1)" }}
+          style={{ borderBottom: "1px solid rgba(85,214,255,0.12)" }}
         >
-          <div className="flex items-center gap-3">
-            <div
-              className="icon-tile"
-              style={{
-                borderColor: `${role.color}55`,
-                background: `${role.color}18`,
-              }}
-            >
-              <role.icon size={22} color={role.color} />
-            </div>
-            <div>
-              <p
-                className="text-xs font-montserrat tracking-widest uppercase"
-                style={{ color: "rgba(100,180,220,0.6)" }}
-              >
-                Registration Form
-              </p>
-              <h2 className="font-montserrat font-bold text-sm tracking-wide text-white uppercase leading-tight">
-                {role.title}
-              </h2>
-            </div>
+          <div
+            className="inline-block px-3 py-1 rounded-full text-xs font-montserrat tracking-widest uppercase mb-3"
+            style={{
+              background: "rgba(85,214,255,0.08)",
+              border: "1px solid rgba(85,214,255,0.2)",
+              color: "rgba(85,214,255,0.6)",
+            }}
+          >
+            Registration Portal
           </div>
+          <h2
+            className="font-montserrat font-black text-sm tracking-wide uppercase"
+            style={{ color: "#55d6ff" }}
+          >
+            {role.title}
+          </h2>
         </div>
 
         <div className="px-8 pb-8 pt-6">
+          {/* FORM */}
           {stage === "form" && (
             <form
               onSubmit={handleSubmit}
               className="space-y-4"
-              data-ocid="registration.panel"
+              data-ocid="registration.form"
             >
-              {isFetching && (
-                <div
-                  className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
-                  style={{
-                    background: "rgba(85,214,255,0.06)",
-                    border: "1px solid rgba(85,214,255,0.15)",
-                    color: "rgba(85,214,255,0.6)",
-                  }}
-                >
-                  <Loader2 size={12} className="animate-spin" />
-                  Connecting to server… you can fill the form while waiting.
-                </div>
-              )}
-              {(
-                [
-                  ["Full Name", "name", "text", "John Smith"],
-                  ["Date of Birth", "dob", "date", ""],
-                  ["Email Address", "email", "email", "name@company.com"],
-                  ["Mobile Number", "mobile", "tel", "+91 9000000000"],
-                  ["Country", "country", "text", "India"],
-                ] as const
-              ).map(([label, key, type, ph]) => (
-                <div key={key} className="space-y-1">
-                  <Label
-                    className="text-xs font-montserrat tracking-widest uppercase"
-                    style={{ color: "rgba(100,180,220,0.7)" }}
-                  >
-                    {label}
-                  </Label>
-                  <Input
-                    data-ocid={`registration.${key}_input`}
-                    type={type}
-                    value={fields[key]}
-                    onChange={(e) => set(key)(e.target.value)}
-                    placeholder={ph}
-                    style={{
-                      background: "rgba(12,28,42,0.8)",
-                      border: "1px solid rgba(85,214,255,0.22)",
-                      color: "#e2f4ff",
-                    }}
-                  />
-                </div>
-              ))}
               <div className="space-y-1">
                 <Label
                   className="text-xs font-montserrat tracking-widest uppercase"
-                  style={{ color: "rgba(100,180,220,0.7)" }}
+                  style={{ color: "rgba(85,214,255,0.6)" }}
                 >
-                  Registration Purpose
+                  Full Name *
                 </Label>
-                <Select value={fields.purpose} onValueChange={set("purpose")}>
+                <Input
+                  data-ocid="registration.name_input"
+                  value={fields.name}
+                  onChange={(e) => set("name")(e.target.value)}
+                  style={{
+                    background: "rgba(4,13,22,0.8)",
+                    border: "1px solid rgba(85,214,255,0.2)",
+                    color: "#e2f4ff",
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label
+                  className="text-xs font-montserrat tracking-widest uppercase"
+                  style={{ color: "rgba(85,214,255,0.6)" }}
+                >
+                  Date of Birth *
+                </Label>
+                <Input
+                  data-ocid="registration.dob_input"
+                  type="date"
+                  value={fields.dob}
+                  onChange={(e) => set("dob")(e.target.value)}
+                  style={{
+                    background: "rgba(4,13,22,0.8)",
+                    border: "1px solid rgba(85,214,255,0.2)",
+                    color: "#e2f4ff",
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label
+                  className="text-xs font-montserrat tracking-widest uppercase"
+                  style={{ color: "rgba(85,214,255,0.6)" }}
+                >
+                  Email ID *
+                </Label>
+                <Input
+                  data-ocid="registration.email_input"
+                  type="email"
+                  value={fields.email}
+                  onChange={(e) => set("email")(e.target.value)}
+                  style={{
+                    background: "rgba(4,13,22,0.8)",
+                    border: "1px solid rgba(85,214,255,0.2)",
+                    color: "#e2f4ff",
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label
+                  className="text-xs font-montserrat tracking-widest uppercase"
+                  style={{ color: "rgba(85,214,255,0.6)" }}
+                >
+                  Mobile Number *
+                </Label>
+                <Input
+                  data-ocid="registration.mobile_input"
+                  type="tel"
+                  value={fields.mobile}
+                  onChange={(e) => set("mobile")(e.target.value)}
+                  style={{
+                    background: "rgba(4,13,22,0.8)",
+                    border: "1px solid rgba(85,214,255,0.2)",
+                    color: "#e2f4ff",
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label
+                  className="text-xs font-montserrat tracking-widest uppercase"
+                  style={{ color: "rgba(85,214,255,0.6)" }}
+                >
+                  Country *
+                </Label>
+                <Input
+                  data-ocid="registration.country_input"
+                  value={fields.country}
+                  onChange={(e) => set("country")(e.target.value)}
+                  style={{
+                    background: "rgba(4,13,22,0.8)",
+                    border: "1px solid rgba(85,214,255,0.2)",
+                    color: "#e2f4ff",
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label
+                  className="text-xs font-montserrat tracking-widest uppercase"
+                  style={{ color: "rgba(85,214,255,0.6)" }}
+                >
+                  Registration Purpose *
+                </Label>
+                <Select onValueChange={set("purpose")} value={fields.purpose}>
                   <SelectTrigger
-                    data-ocid="registration.select"
+                    data-ocid="registration.purpose_select"
                     style={{
-                      background: "rgba(12,28,42,0.8)",
-                      border: "1px solid rgba(85,214,255,0.22)",
+                      background: "rgba(4,13,22,0.8)",
+                      border: "1px solid rgba(85,214,255,0.2)",
                       color: fields.purpose
                         ? "#e2f4ff"
-                        : "rgba(160,200,230,0.4)",
+                        : "rgba(130,180,220,0.4)",
                     }}
                   >
-                    <SelectValue placeholder="Select registration purpose..." />
+                    <SelectValue placeholder="Select purpose..." />
                   </SelectTrigger>
                   <SelectContent
                     style={{
-                      background: "#091827",
-                      border: "1px solid rgba(85,214,255,0.25)",
+                      background: "#061220",
+                      border: "1px solid rgba(85,214,255,0.2)",
                     }}
                   >
                     {PURPOSES.map((p) => (
@@ -326,218 +361,202 @@ Corporate Administration Team`;
                 </Select>
               </div>
               {fieldError && (
-                <p
-                  data-ocid="registration.error_state"
-                  className="text-xs"
-                  style={{ color: "#ff8080" }}
-                >
+                <p className="text-xs" style={{ color: "#ff8080" }}>
                   {fieldError}
                 </p>
               )}
               <Button
                 type="submit"
                 data-ocid="registration.submit_button"
-                className="w-full btn-cyan-solid font-montserrat tracking-widest text-xs uppercase mt-2"
-                style={{ height: "44px" }}
+                className="w-full font-montserrat tracking-widest text-xs uppercase"
+                style={{
+                  height: "44px",
+                  background:
+                    "linear-gradient(135deg, rgba(0,120,180,0.85), rgba(0,80,140,0.8))",
+                  color: "#fff",
+                  border: "1px solid rgba(85,214,255,0.3)",
+                }}
               >
-                Submit Registration <ChevronRight size={14} className="ml-1" />
+                <ChevronRight size={14} className="mr-2" />
+                Submit Registration
               </Button>
             </form>
           )}
 
+          {/* LOADING */}
           {stage === "loading" && (
             <div
               data-ocid="registration.loading_state"
-              className="flex flex-col items-center py-10 gap-4"
+              className="flex flex-col items-center py-8 gap-4"
             >
               <Loader2
-                size={40}
+                size={36}
                 className="animate-spin"
                 style={{ color: "#55d6ff" }}
               />
-              <p
-                className="font-montserrat text-sm tracking-widest uppercase"
-                style={{ color: "rgba(100,180,220,0.7)" }}
+              <div className="w-full text-center space-y-2">
+                <p
+                  className="font-montserrat text-xs font-bold tracking-widest uppercase"
+                  style={{ color: "rgba(85,214,255,0.9)" }}
+                >
+                  SUBMITTING REGISTRATION
+                </p>
+                <p
+                  className="text-xs"
+                  style={{ color: "rgba(85,214,255,0.55)" }}
+                >
+                  Server is starting up &mdash; please wait
+                </p>
+              </div>
+              <div
+                className="w-full rounded-full overflow-hidden"
+                style={{ height: "6px", background: "rgba(85,214,255,0.12)" }}
               >
-                {loadingMsg}
+                <div
+                  className="h-full rounded-full transition-all duration-1000"
+                  style={{
+                    width: `${progress}%`,
+                    background:
+                      "linear-gradient(90deg, rgba(0,100,160,0.8), rgba(85,214,255,0.9))",
+                  }}
+                />
+              </div>
+              <p
+                className="text-xs font-montserrat font-bold"
+                style={{ color: "rgba(85,214,255,0.7)" }}
+              >
+                {remaining > 0
+                  ? `~${remaining} seconds remaining`
+                  : "Almost ready..."}
               </p>
               <p
                 className="text-xs text-center"
-                style={{ color: "rgba(100,180,220,0.45)" }}
+                style={{ color: "rgba(85,214,255,0.3)", fontSize: "0.6rem" }}
               >
-                Please wait while we securely process your registration.
+                First use takes 30&ndash;60 seconds. Please do not close this
+                window.
               </p>
             </div>
           )}
 
+          {/* SUCCESS */}
           {stage === "success" && (
-            <div
-              data-ocid="registration.success_state"
-              className="flex flex-col items-center py-4 gap-5 text-center"
-            >
+            <div data-ocid="registration.success_state" className="space-y-4">
               <div
-                className="w-16 h-16 rounded-full flex items-center justify-center"
+                className="flex items-center gap-3 p-4 rounded-xl"
                 style={{
-                  background: "rgba(0,220,120,0.12)",
-                  border: "2px solid rgba(0,220,120,0.4)",
-                  boxShadow: "0 0 28px rgba(0,220,120,0.2)",
+                  background: "rgba(0,220,120,0.08)",
+                  border: "1px solid rgba(0,220,120,0.3)",
                 }}
               >
-                <CheckCircle size={34} color="#00dc78" />
-              </div>
-              <div>
-                <h3
-                  className="font-montserrat font-black tracking-widest uppercase"
-                  style={{
-                    color: "#00dc78",
-                    fontSize: "clamp(0.75rem, 3vw, 1rem)",
-                    letterSpacing: "0.18em",
-                    textShadow: "0 0 16px rgba(0,220,120,0.45)",
-                  }}
-                >
-                  REGISTRATION SUBMITTED SUCCESSFULLY
-                </h3>
+                <CheckCircle size={20} color="#00dc78" />
                 <p
-                  className="text-xs mt-1 font-montserrat tracking-widest uppercase"
-                  style={{ color: "rgba(100,180,220,0.55)" }}
+                  className="text-xs font-montserrat font-bold tracking-widest uppercase"
+                  style={{ color: "#00dc78" }}
                 >
-                  {role.title}
+                  Registration Submitted
                 </p>
               </div>
               <div
-                className="w-full p-4 rounded-xl flex items-center justify-between gap-3"
+                className="p-4 rounded-xl"
                 style={{
-                  background: "rgba(85,214,255,0.06)",
-                  border: "1px solid rgba(85,214,255,0.25)",
+                  background: "rgba(4,13,22,0.8)",
+                  border: "1px solid rgba(85,214,255,0.12)",
                 }}
               >
-                <div className="text-left">
-                  <p
-                    className="text-xs font-montserrat tracking-widest uppercase mb-1"
-                    style={{ color: "rgba(85,214,255,0.6)" }}
-                  >
-                    Registration ID
-                  </p>
-                  <code
-                    className="font-bold"
-                    style={{ color: "#55d6ff", fontSize: "0.85rem" }}
-                  >
+                <p
+                  className="text-xs font-montserrat font-bold tracking-widest uppercase mb-2"
+                  style={{ color: "rgba(85,214,255,0.6)" }}
+                >
+                  Request ID
+                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <code className="text-xs" style={{ color: "#55d6ff" }}>
                     {regId}
                   </code>
+                  <button
+                    type="button"
+                    onClick={copyRegId}
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded"
+                    style={{
+                      background: copied
+                        ? "rgba(0,220,120,0.15)"
+                        : "rgba(85,214,255,0.1)",
+                      border: "1px solid rgba(85,214,255,0.2)",
+                      color: copied ? "#00dc78" : "#55d6ff",
+                    }}
+                  >
+                    <Copy size={12} /> {copied ? "Copied" : "Copy"}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={copyRegId}
-                  title="Copy Registration ID"
-                  style={{
-                    background: copied
-                      ? "rgba(0,220,120,0.15)"
-                      : "rgba(85,214,255,0.1)",
-                    border: `1px solid ${copied ? "rgba(0,220,120,0.4)" : "rgba(85,214,255,0.3)"}`,
-                    borderRadius: "8px",
-                    padding: "6px 8px",
-                    cursor: "pointer",
-                    color: copied ? "#00dc78" : "#55d6ff",
-                    flexShrink: 0,
-                  }}
-                >
-                  <Copy size={14} />
-                </button>
               </div>
               <div
-                className="w-full p-5 rounded-xl text-left"
+                className="p-4 rounded-xl"
                 style={{
-                  background: "rgba(0,220,120,0.04)",
-                  border: "1px solid rgba(0,220,120,0.2)",
-                  borderLeft: "3px solid rgba(0,220,120,0.5)",
+                  background: "rgba(4,13,22,0.6)",
+                  border: "1px solid rgba(85,214,255,0.1)",
                 }}
               >
-                <p
-                  className="text-xs font-montserrat font-bold tracking-widest uppercase mb-3"
-                  style={{ color: "rgba(0,220,120,0.7)" }}
-                >
-                  ✦ Official Acknowledgement
-                </p>
-                <p
-                  className="text-sm leading-relaxed"
+                <pre
+                  className="text-xs leading-relaxed whitespace-pre-wrap"
                   style={{
-                    color: "rgba(200,240,220,0.85)",
-                    fontStyle: "italic",
-                    lineHeight: "1.8",
-                    whiteSpace: "pre-line",
+                    color: "rgba(160,200,230,0.8)",
+                    fontFamily: "inherit",
                   }}
                 >
                   {greetingMessage}
-                </p>
+                </pre>
               </div>
-              <div className="flex gap-3 w-full">
-                <Button
+              {onStatusCheck && (
+                <button
+                  type="button"
                   onClick={() => {
-                    onStatusCheck?.(fields.email);
+                    onStatusCheck(fields.email);
                     onClose();
                   }}
-                  data-ocid="registration.secondary_button"
-                  className="flex-1 btn-cyan font-montserrat text-xs tracking-widest uppercase"
-                  style={{ height: "40px" }}
+                  className="w-full py-2.5 rounded-xl text-xs font-montserrat font-bold tracking-widest uppercase"
+                  style={{
+                    background: "rgba(85,214,255,0.08)",
+                    border: "1px solid rgba(85,214,255,0.2)",
+                    color: "rgba(85,214,255,0.8)",
+                  }}
+                  data-ocid="registration.check_status_button"
                 >
                   Check My Status
-                </Button>
-                <Button
-                  onClick={onClose}
-                  data-ocid="registration.close_button"
-                  variant="ghost"
-                  className="flex-1 text-xs"
-                  style={{ color: "rgba(100,180,220,0.5)" }}
-                >
-                  Close
-                </Button>
-              </div>
+                </button>
+              )}
             </div>
           )}
 
+          {/* ERROR */}
           {stage === "error" && (
-            <div
-              data-ocid="registration.error_state"
-              className="flex flex-col items-center py-6 gap-4 text-center"
-            >
+            <div data-ocid="registration.error_state" className="space-y-4">
               <div
-                className="w-16 h-16 rounded-full flex items-center justify-center"
+                className="p-4 rounded-xl text-center"
                 style={{
-                  background: "rgba(255,80,80,0.12)",
-                  border: "2px solid rgba(255,80,80,0.35)",
+                  background: "rgba(255,80,80,0.08)",
+                  border: "1px solid rgba(255,80,80,0.3)",
                 }}
               >
-                <X size={32} color="#ff6060" />
-              </div>
-              <h3 className="font-montserrat font-bold tracking-widest text-white">
-                Submission Failed
-              </h3>
-              <p className="text-xs" style={{ color: "rgba(220,160,160,0.8)" }}>
-                {errMsg}
-              </p>
-              <p className="text-xs" style={{ color: "rgba(160,200,230,0.5)" }}>
-                Please try again or contact support at
-                contact.adminvicky@myapp.com.
-              </p>
-              <div className="flex gap-3 w-full">
-                <Button
-                  onClick={() => setStage("form")}
-                  data-ocid="registration.primary_button"
-                  className="flex-1 btn-cyan-solid font-montserrat text-xs tracking-widest uppercase"
-                  style={{ height: "40px" }}
+                <p
+                  className="text-xs font-montserrat font-bold"
+                  style={{ color: "#ff8080" }}
                 >
-                  Try Again
-                </Button>
-                <Button
-                  onClick={onClose}
-                  variant="ghost"
-                  data-ocid="registration.cancel_button"
-                  className="flex-1 text-xs"
-                  style={{ color: "rgba(100,180,220,0.5)" }}
-                >
-                  Close
-                </Button>
+                  {errMsg}
+                </p>
               </div>
+              <button
+                type="button"
+                onClick={() => setStage("form")}
+                className="w-full py-2.5 rounded-xl text-xs font-montserrat font-bold tracking-widest uppercase"
+                style={{
+                  background: "rgba(85,214,255,0.08)",
+                  border: "1px solid rgba(85,214,255,0.2)",
+                  color: "rgba(85,214,255,0.8)",
+                }}
+              >
+                Try Again
+              </button>
             </div>
           )}
         </div>

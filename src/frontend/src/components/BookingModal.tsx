@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { useNexusActor } from "../hooks/useNexusActor";
+import { robustCall } from "../hooks/useNexusActor";
 
 const PURPOSES = [
   {
@@ -61,12 +61,6 @@ function Field({
 }
 
 export function BookingModal({ roomName, roomType, onClose }: Props) {
-  const { actor, isFetching } = useNexusActor();
-  const actorRef = useRef(actor);
-  useEffect(() => {
-    actorRef.current = actor;
-  }, [actor]);
-
   const [form, setForm] = useState({
     bookerName: "",
     panName: "",
@@ -84,19 +78,32 @@ export function BookingModal({ roomName, roomType, onClose }: Props) {
     message: string;
     bookingId?: string;
   } | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number>(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (loading) {
+      startRef.current = Date.now();
+      setElapsed(0);
+      timerRef.current = setInterval(
+        () => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)),
+        1000,
+      );
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [loading]);
+
+  const MAX_WAIT = 65;
+  const remaining = Math.max(0, MAX_WAIT - elapsed);
+  const progress = Math.min(100, (elapsed / MAX_WAIT) * 100);
 
   function set(field: string, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
-  }
-
-  async function waitForActor(maxWaitMs = 20000) {
-    if (actorRef.current) return actorRef.current;
-    const start = Date.now();
-    while (Date.now() - start < maxWaitMs) {
-      await new Promise((r) => setTimeout(r, 600));
-      if (actorRef.current) return actorRef.current;
-    }
-    return null;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -130,30 +137,24 @@ export function BookingModal({ roomName, roomType, onClose }: Props) {
     setLoading(true);
     setResult(null);
 
-    const nb = await waitForActor();
-    if (!nb) {
-      setResult({
-        success: false,
-        message: "Cannot reach server. Please wait and try again.",
-      });
-      setLoading(false);
-      return;
-    }
-
     try {
-      const resp = await nb.submitBooking(
-        roomName,
-        roomType,
-        bookerName,
-        panName,
-        dob,
-        mobile,
-        email,
-        purpose,
-        bookingDate,
-        bookingHour,
-        bookingMinute,
-        "00",
+      const resp = await robustCall(
+        (actor) =>
+          actor.submitBooking(
+            roomName,
+            roomType,
+            bookerName,
+            panName,
+            dob,
+            mobile,
+            email,
+            purpose,
+            bookingDate,
+            bookingHour,
+            bookingMinute,
+            "00",
+          ),
+        20,
       );
       if (resp.startsWith("CONFLICT:")) {
         setResult({
@@ -169,10 +170,16 @@ export function BookingModal({ roomName, roomType, onClose }: Props) {
         });
       }
     } catch (err) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : "Submission failed. Please try again.";
+      const raw = err instanceof Error ? err.message : String(err);
+      let msg = "Submission failed. Please wait 30 seconds and try again.";
+      if (raw.toLowerCase().includes("stopped") || raw.includes("IC0508"))
+        msg =
+          "Server is temporarily offline. Please wait 1 minute and try again.";
+      else if (
+        raw.toLowerCase().includes("network") ||
+        raw.toLowerCase().includes("fetch")
+      )
+        msg = "Network error. Please check your internet connection.";
       setResult({ success: false, message: msg });
     } finally {
       setLoading(false);
@@ -247,19 +254,6 @@ export function BookingModal({ roomName, roomType, onClose }: Props) {
           </button>
         </div>
 
-        {isFetching && (
-          <div
-            className="mx-6 mt-4 p-3 rounded-xl text-xs flex items-center gap-2"
-            style={{
-              background: accentAlpha(0.06),
-              border: `1px solid ${accentAlpha(0.2)}`,
-              color: accentAlpha(0.7),
-            }}
-          >
-            <span className="animate-spin">&#9696;</span> Connecting to server…
-          </div>
-        )}
-
         <AnimatePresence>
           {result && (
             <motion.div
@@ -290,8 +284,43 @@ export function BookingModal({ roomName, roomType, onClose }: Props) {
           )}
         </AnimatePresence>
 
+        {/* Loading progress bar */}
+        {loading && (
+          <div className="mx-6 mt-4 space-y-2">
+            <div
+              className="flex items-center justify-between text-xs font-montserrat font-bold"
+              style={{ color: accentAlpha(0.8) }}
+            >
+              <span>CONNECTING TO SERVER...</span>
+              <span>{remaining > 0 ? `~${remaining}s` : "Almost ready"}</span>
+            </div>
+            <div
+              className="w-full rounded-full overflow-hidden"
+              style={{ height: "5px", background: accentAlpha(0.1) }}
+            >
+              <div
+                className="h-full rounded-full transition-all duration-1000"
+                style={{
+                  width: `${progress}%`,
+                  background: `linear-gradient(90deg, ${accentAlpha(0.5)}, ${accentAlpha(1)})`,
+                }}
+              />
+            </div>
+            <p
+              className="text-xs"
+              style={{ color: accentAlpha(0.4), fontSize: "0.6rem" }}
+            >
+              First use may take 30–60 seconds. Please do not close.
+            </p>
+          </div>
+        )}
+
         {!result?.success && (
-          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <form
+            onSubmit={handleSubmit}
+            className="p-6 space-y-4"
+            data-ocid="booking.form"
+          >
             <Field
               id="bk-name"
               label="Full Name (As per Aadhar) *"
@@ -305,8 +334,8 @@ export function BookingModal({ roomName, roomType, onClose }: Props) {
                 onChange={(e) => set("bookerName", e.target.value)}
                 className={cls}
                 style={inputStyle}
-                data-ocid="booking.input"
                 placeholder="Enter full name as per Aadhar"
+                data-ocid="booking.input"
               />
             </Field>
             <Field
@@ -454,7 +483,7 @@ export function BookingModal({ roomName, roomType, onClose }: Props) {
             </div>
             <button
               type="submit"
-              disabled={loading || isFetching}
+              disabled={loading}
               data-ocid="booking.submit_button"
               className="w-full py-3 rounded-xl font-montserrat font-black text-xs tracking-widest uppercase transition-all"
               style={{
@@ -463,14 +492,10 @@ export function BookingModal({ roomName, roomType, onClose }: Props) {
                   : `linear-gradient(135deg, ${accentAlpha(0.25)}, ${accentAlpha(0.15)})`,
                 border: `1px solid ${accentAlpha(0.4)}`,
                 color: loading ? accentAlpha(0.5) : accentColor,
-                cursor: loading || isFetching ? "not-allowed" : "pointer",
+                cursor: loading ? "not-allowed" : "pointer",
               }}
             >
-              {loading
-                ? "Submitting..."
-                : isFetching
-                  ? "Connecting..."
-                  : "SUBMIT BOOKING REQUEST"}
+              {loading ? "Connecting... please wait" : "SUBMIT BOOKING REQUEST"}
             </button>
           </form>
         )}
