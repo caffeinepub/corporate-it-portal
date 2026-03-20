@@ -11,7 +11,7 @@ import {
 import { CheckCircle, ChevronRight, Copy, Loader2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { RoleDef } from "../App";
-import { useBackend } from "../hooks/useBackend";
+import { useNexusActor } from "../hooks/useNexusActor";
 
 const PURPOSES = [
   "IT Infrastructure Management",
@@ -59,31 +59,13 @@ function initFields(): Fields {
   return { name: "", dob: "", email: "", mobile: "", country: "", purpose: "" };
 }
 
-type BackendActor = {
-  submitRegistration(
-    name: string,
-    dateOfBirth: string,
-    email: string,
-    mobile: string,
-    country: string,
-    roleTitle: string,
-    registrationPurpose: string,
-    deviceInfo: string,
-  ): Promise<string>;
-  logFailedRegistration(
-    email: string,
-    roleTitle: string,
-    errorMsg: string,
-    deviceInfo: string,
-  ): Promise<void>;
-};
-
 export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
-  const { actor, isFetching } = useBackend();
+  const { actor, isFetching } = useNexusActor();
   const actorRef = useRef(actor);
   useEffect(() => {
     actorRef.current = actor;
   }, [actor]);
+
   const [fields, setFields] = useState<Fields>(initFields);
   const [stage, setStage] = useState<Stage>("form");
   const [regId, setRegId] = useState("");
@@ -96,12 +78,12 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
     return (v: string) => setFields((p) => ({ ...p, [k]: v }));
   }
 
-  async function waitForActor(maxWaitMs = 15000): Promise<BackendActor | null> {
-    if (actorRef.current) return actorRef.current as unknown as BackendActor;
+  async function waitForActor(maxWaitMs = 20000) {
+    if (actorRef.current) return actorRef.current;
     const start = Date.now();
     while (Date.now() - start < maxWaitMs) {
-      await new Promise((r) => setTimeout(r, 800));
-      if (actorRef.current) return actorRef.current as unknown as BackendActor;
+      await new Promise((r) => setTimeout(r, 600));
+      if (actorRef.current) return actorRef.current;
     }
     return null;
   }
@@ -130,7 +112,7 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
     setLoadingMsg("Submitting your registration...");
     const deviceInfo = `${navigator.userAgent} | ${navigator.language} | ${screen.width}x${screen.height}`;
 
-    const attempt = async () =>
+    const attempt = () =>
       nb.submitRegistration(
         fields.name.trim(),
         fields.dob,
@@ -144,8 +126,7 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
 
     try {
       const id = await attempt();
-      if (!id || id.trim() === "")
-        throw new Error("Server returned an empty registration ID.");
+      if (!id || id.trim() === "") throw new Error("Server returned empty ID.");
       localStorage.setItem(
         `nexus_reg_${fields.email.trim().toLowerCase()}`,
         id,
@@ -158,7 +139,7 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
       try {
         const id = await attempt();
         if (!id || id.trim() === "")
-          throw new Error("Server returned an empty registration ID.");
+          throw new Error("Server returned empty ID.");
         localStorage.setItem(
           `nexus_reg_${fields.email.trim().toLowerCase()}`,
           id,
@@ -189,7 +170,20 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
     });
   }
 
-  const greetingMessage = `Dear ${fields.name || "Valued Applicant"}, thank you for registering on the NEXUS IT PORTAL — EBC Booking Management System. Your registration request has been received and is currently under review by our administration team. We will process your application at the earliest and notify you of the outcome. Please save your Registration ID for future reference. Our team is committed to reviewing all requests promptly and professionally. We sincerely appreciate your patience and look forward to welcoming you to our enterprise network. — NEXUS IT Portal Administration`;
+  const greetingMessage = `Dear ${fields.name || "Valued Applicant"},
+
+Thank you for registering with our Conference Service Management System.
+
+We sincerely appreciate your interest in being part of our corporate workflow environment. Your registration request has been successfully received and is currently under review by our Application Administration Team.
+
+We value your patience and cooperation during this process. Our team is carefully verifying your details to ensure a secure and well-structured system experience for all users.
+
+Kindly allow us some time to complete the verification. You will be notified shortly once your request has been reviewed and processed.
+
+We look forward to welcoming you onboard.
+
+Best Regards,
+Corporate Administration Team`;
 
   return (
     <div
@@ -205,7 +199,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
         onKeyDown={(e) => e.stopPropagation()}
         data-ocid="registration.modal"
       >
-        {/* Close button */}
         <button
           type="button"
           onClick={onClose}
@@ -216,7 +209,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
           <X size={18} color="#55d6ff" />
         </button>
 
-        {/* Header */}
         <div
           className="px-8 pt-8 pb-5"
           style={{ borderBottom: "1px solid rgba(85,214,255,0.1)" }}
@@ -246,7 +238,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
         </div>
 
         <div className="px-8 pb-8 pt-6">
-          {/* FORM */}
           {stage === "form" && (
             <form
               onSubmit={handleSubmit}
@@ -266,7 +257,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
                   Connecting to server… you can fill the form while waiting.
                 </div>
               )}
-
               {(
                 [
                   ["Full Name", "name", "text", "John Smith"],
@@ -297,7 +287,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
                   />
                 </div>
               ))}
-
               <div className="space-y-1">
                 <Label
                   className="text-xs font-montserrat tracking-widest uppercase"
@@ -336,7 +325,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
                   </SelectContent>
                 </Select>
               </div>
-
               {fieldError && (
                 <p
                   data-ocid="registration.error_state"
@@ -346,7 +334,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
                   {fieldError}
                 </p>
               )}
-
               <Button
                 type="submit"
                 data-ocid="registration.submit_button"
@@ -358,7 +345,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
             </form>
           )}
 
-          {/* LOADING */}
           {stage === "loading" && (
             <div
               data-ocid="registration.loading_state"
@@ -384,7 +370,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
             </div>
           )}
 
-          {/* SUCCESS */}
           {stage === "success" && (
             <div
               data-ocid="registration.success_state"
@@ -400,7 +385,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
               >
                 <CheckCircle size={34} color="#00dc78" />
               </div>
-
               <div>
                 <h3
                   className="font-montserrat font-black tracking-widest uppercase"
@@ -420,7 +404,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
                   {role.title}
                 </p>
               </div>
-
               <div
                 className="w-full p-4 rounded-xl flex items-center justify-between gap-3"
                 style={{
@@ -461,7 +444,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
                   <Copy size={14} />
                 </button>
               </div>
-
               <div
                 className="w-full p-5 rounded-xl text-left"
                 style={{
@@ -482,12 +464,12 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
                     color: "rgba(200,240,220,0.85)",
                     fontStyle: "italic",
                     lineHeight: "1.8",
+                    whiteSpace: "pre-line",
                   }}
                 >
                   {greetingMessage}
                 </p>
               </div>
-
               <div className="flex gap-3 w-full">
                 <Button
                   onClick={() => {
@@ -513,7 +495,6 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
             </div>
           )}
 
-          {/* ERROR */}
           {stage === "error" && (
             <div
               data-ocid="registration.error_state"
@@ -535,8 +516,8 @@ export function RegistrationModal({ role, onClose, onStatusCheck }: Props) {
                 {errMsg}
               </p>
               <p className="text-xs" style={{ color: "rgba(160,200,230,0.5)" }}>
-                This error has been logged. Please try again or contact support
-                at contact.adminvicky@myapp.com.
+                Please try again or contact support at
+                contact.adminvicky@myapp.com.
               </p>
               <div className="flex gap-3 w-full">
                 <Button

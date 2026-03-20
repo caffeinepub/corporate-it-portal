@@ -19,9 +19,13 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { AdminLoginModal } from "./components/AdminLoginModal";
+import { BookingStatusModal } from "./components/BookingStatusModal";
+import { ConferenceRoomsSection } from "./components/ConferenceRoomsSection";
+import { DiningRoomsSection } from "./components/DiningRoomsSection";
 import { EBCSlideshow } from "./components/EBCSlideshow";
 import { RegistrationModal } from "./components/RegistrationModal";
 import { StatusCheckModal } from "./components/StatusCheckModal";
+import { UserBookingDashboard } from "./components/UserBookingDashboard";
 import { useAdminAuth } from "./hooks/useAdminAuth";
 
 // ─── Role definitions ──────────────────────────────────────────────────────────
@@ -473,6 +477,8 @@ export default function App() {
   const [showStatusCheck, setShowStatusCheck] = useState(false);
   const [statusCheckEmail, setStatusCheckEmail] = useState("");
   const [activeRole, setActiveRole] = useState<RoleDef | null>(null);
+  const [showBookingStatus, setShowBookingStatus] = useState(false);
+  const [showUserDashboard, setShowUserDashboard] = useState(false);
 
   function openStatusCheck(email = "") {
     setStatusCheckEmail(email);
@@ -560,6 +566,15 @@ export default function App() {
             >
               <Search size={14} />
               <span className="hidden sm:inline">Check Status</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowUserDashboard(true)}
+              data-ocid="nav.booking_status.button"
+              className="btn-cyan flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-montserrat font-bold tracking-widest uppercase"
+            >
+              <Search size={14} />
+              <span className="hidden sm:inline">My Bookings</span>
             </button>
 
             {isVerifying ? null : isAdmin ? (
@@ -696,6 +711,49 @@ export default function App() {
                   ))}
                 </div>
               </section>
+
+              {/* Book a Room */}
+              <section className="max-w-7xl mx-auto px-4 pb-4">
+                <div className="flex items-center gap-4 mb-2">
+                  <div
+                    className="flex-1 h-px"
+                    style={{
+                      background:
+                        "linear-gradient(90deg, transparent, rgba(85,214,255,0.2), transparent)",
+                    }}
+                  />
+                  <h2
+                    className="font-montserrat font-black text-base tracking-widest uppercase"
+                    style={{
+                      color: "rgba(85,214,255,0.6)",
+                      letterSpacing: "0.25em",
+                    }}
+                  >
+                    BOOK A ROOM
+                  </h2>
+                  <div
+                    className="flex-1 h-px"
+                    style={{
+                      background:
+                        "linear-gradient(90deg, transparent, rgba(85,214,255,0.2), transparent)",
+                    }}
+                  />
+                </div>
+                <p
+                  className="text-center text-xs font-montserrat tracking-widest uppercase"
+                  style={{ color: "rgba(100,180,220,0.4)" }}
+                >
+                  Select a conference or dining room to make a reservation
+                </p>
+              </section>
+
+              <section className="max-w-7xl mx-auto px-4 pb-12">
+                <ConferenceRoomsSection />
+              </section>
+
+              <section className="max-w-7xl mx-auto px-4 pb-12">
+                <DiningRoomsSection />
+              </section>
             </motion.div>
           )}
         </AnimatePresence>
@@ -739,6 +797,12 @@ export default function App() {
             onClose={() => setActiveRole(null)}
             onStatusCheck={(email) => openStatusCheck(email)}
           />
+        )}
+        {showBookingStatus && (
+          <BookingStatusModal onClose={() => setShowBookingStatus(false)} />
+        )}
+        {showUserDashboard && (
+          <UserBookingDashboard onClose={() => setShowUserDashboard(false)} />
         )}
       </AnimatePresence>
     </div>

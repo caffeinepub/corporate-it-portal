@@ -22,12 +22,7 @@ export function AdminLoginModal({ onClose }: Props) {
       setError("Please enter username and password.");
       return;
     }
-    if (isFetching) {
-      setError(
-        "Server is still connecting, please wait a moment and try again.",
-      );
-      return;
-    }
+
     setLoading(true);
     setError("");
     try {
@@ -45,15 +40,19 @@ export function AdminLoginModal({ onClose }: Props) {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (
+      if (msg.toLowerCase().includes("stopped") || msg.includes("IC0508")) {
+        setError(
+          "Backend is currently offline. The app is being redeployed. Please try again in a moment.",
+        );
+      } else if (
         msg.toLowerCase().includes("initialize") ||
         msg.toLowerCase().includes("method")
       ) {
         setError(
-          "Server is initializing, please wait 10 seconds and try again.",
+          "Cannot connect to server. Please wait a few seconds and try again.",
         );
       } else {
-        setError(`Login failed: ${msg}`);
+        setError("Login failed. Please check your credentials and try again.");
       }
     } finally {
       setLoading(false);
@@ -90,7 +89,7 @@ export function AdminLoginModal({ onClose }: Props) {
               Admin Login
             </h2>
             <p className="text-xs" style={{ color: "rgba(100,180,220,0.6)" }}>
-              NEXUS IT PORTAL — Secure Access
+              Secure Access — Authorized Personnel Only
             </p>
           </div>
         </div>
@@ -121,7 +120,7 @@ export function AdminLoginModal({ onClose }: Props) {
               data-ocid="admin_login.input"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="nexus_admin"
+              placeholder="Enter admin username"
               autoComplete="username"
               className="glass-input"
               style={{
@@ -158,34 +157,6 @@ export function AdminLoginModal({ onClose }: Props) {
                 style={{ color: "rgba(85,214,255,0.4)" }}
               />
             </div>
-          </div>
-
-          {/* Credentials hint */}
-          <div
-            className="text-xs px-3 py-2 rounded-lg"
-            style={{
-              background: "rgba(85,214,255,0.05)",
-              border: "1px solid rgba(85,214,255,0.12)",
-              color: "rgba(85,214,255,0.5)",
-            }}
-          >
-            Admin 1:{" "}
-            <strong style={{ color: "rgba(85,214,255,0.8)" }}>
-              nexus_admin
-            </strong>{" "}
-            /{" "}
-            <strong style={{ color: "rgba(85,214,255,0.8)" }}>
-              Nexus@Admin2024
-            </strong>
-            <br />
-            Admin 2:{" "}
-            <strong style={{ color: "rgba(85,214,255,0.8)" }}>
-              nexus_admin2
-            </strong>{" "}
-            /{" "}
-            <strong style={{ color: "rgba(85,214,255,0.8)" }}>
-              Nexus@Backup2024
-            </strong>
           </div>
 
           {error && (

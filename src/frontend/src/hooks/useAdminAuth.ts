@@ -1,34 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { useActor } from "./useActor";
+import { unwrapOpt, useNexusActor } from "./useNexusActor";
 
 const TOKEN_KEY = "nexus_admin_token";
 
-// Candid ?Text comes back as [] | [string] from the JS agent.
-// This helper safely unwraps it regardless of whether the binding
-// returns the raw Candid form or has already been coerced to null.
-function unwrapOptionalText(raw: unknown): string | null {
-  if (raw === null || raw === undefined) return null;
-  if (typeof raw === "string") return raw.length > 0 ? raw : null;
-  if (Array.isArray(raw))
-    return raw.length > 0 && typeof raw[0] === "string" ? raw[0] : null;
-  return null;
-}
-
-type AdminActor = {
-  adminLogin(username: string, password: string): Promise<unknown>;
-  verifyAdminToken(token: string): Promise<boolean>;
-  logoutAdmin(token: string): Promise<void>;
-};
-
 export function useAdminAuth() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useNexusActor();
   const [token, setToken] = useState<string | null>(() =>
     localStorage.getItem(TOKEN_KEY),
   );
   const [isAdmin, setIsAdmin] = useState(false);
   const [isVerifying, setIsVerifying] = useState(true);
 
-  // Verify token on mount / when actor becomes available
   useEffect(() => {
     if (isFetching || !actor) return;
     const stored = localStorage.getItem(TOKEN_KEY);
@@ -37,7 +19,7 @@ export function useAdminAuth() {
       setIsVerifying(false);
       return;
     }
-    (actor as unknown as AdminActor)
+    actor
       .verifyAdminToken(stored)
       .then((valid) => {
         if (valid) {
@@ -64,11 +46,8 @@ export function useAdminAuth() {
     ): Promise<boolean | "no_actor"> => {
       if (!actor) return "no_actor";
       try {
-        const raw = await (actor as unknown as AdminActor).adminLogin(
-          username,
-          password,
-        );
-        const tokenValue = unwrapOptionalText(raw);
+        const raw = await actor.adminLogin(username, password);
+        const tokenValue = unwrapOpt(raw);
         if (tokenValue) {
           localStorage.setItem(TOKEN_KEY, tokenValue);
           setToken(tokenValue);
@@ -87,7 +66,7 @@ export function useAdminAuth() {
   const logout = useCallback(async () => {
     if (actor && token) {
       try {
-        await (actor as unknown as AdminActor).logoutAdmin(token);
+        await actor.logoutAdmin(token);
       } catch (_) {
         // ignore
       }

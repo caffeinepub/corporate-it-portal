@@ -6,12 +6,12 @@ import Nat32 "mo:core/Nat32";
 import Char "mo:core/Char";
 import Time "mo:core/Time";
 import Iter "mo:core/Iter";
+import Array "mo:core/Array";
 import Principal "mo:core/Principal";
 import AccessControl "authorization/access-control";
 
 actor {
-  // ─── Migration: absorb old stable variables from previous version
-  // These match the types in the old actor so upgrade does not discard them.
+  // --- Migration compatibility
   type OldUserStatus = { #pending; #approved; #rejected };
   type OldUserProfile = {
     principal : Principal;
@@ -25,12 +25,10 @@ actor {
     rejectionReason : ?Text;
     status : OldUserStatus;
   };
-  // Absorb old userProfiles map (values discarded, not used)
   var userProfiles = Map.empty<Principal, OldUserProfile>();
-  // Absorb old accessControlState
   let accessControlState = AccessControl.initState();
 
-  // ─── New Types
+  // --- Registration Types
   public type RegistrationStatus = { #pending; #approved; #rejected };
 
   public type RegistrationRecord = {
@@ -66,19 +64,69 @@ actor {
     failed : Nat;
   };
 
-  // ─── New State
+  // --- Booking Types
+  public type BookingStatus = { #pending; #approved; #rejected };
+
+  public type BookingRecord = {
+    id : Text;
+    roomName : Text;
+    roomType : Text;
+    bookerName : Text;
+    panName : Text;
+    dob : Text;
+    mobile : Text;
+    email : Text;
+    purpose : Text;
+    bookingDate : Text;
+    bookingHour : Text;
+    bookingMinute : Text;
+    bookingSecond : Text;
+    timestamp : Int;
+    status : BookingStatus;
+    approvedBookingId : ?Text;
+    approvedAt : ?Int;
+    rejectedAt : ?Int;
+    rejectionReason : ?Text;
+  };
+
+  public type BookingStats = {
+    total : Nat;
+    pending : Nat;
+    approved : Nat;
+    rejected : Nat;
+  };
+
+  // --- Service Rating Types
+  public type ServiceRating = {
+    id : Text;
+    bookingId : Text;
+    roomName : Text;
+    bookerName : Text;
+    email : Text;
+    selectedOptions : [Text];
+    overallComment : Text;
+    timestamp : Int;
+  };
+
+  // --- State
   let registrations = Map.empty<Text, RegistrationRecord>();
   let adminSessions = Map.empty<Text, Text>();
   let failedLogs = Map.empty<Text, FailedLog>();
   var regCounter : Nat = 0;
   var logCounter : Nat = 0;
 
+  let bookings = Map.empty<Text, BookingRecord>();
+  var bookingCounter : Nat = 0;
+
+  let ratings = Map.empty<Text, ServiceRating>();
+  var ratingCounter : Nat = 0;
+
   let ADMIN1_USER = "nexus_admin";
   let ADMIN1_PASS = "Nexus@Admin2024";
   let ADMIN2_USER = "nexus_admin2";
   let ADMIN2_PASS = "Nexus@Backup2024";
 
-  // ─── Helpers
+  // --- Helpers
   func generateId(prefix : Text, counter : Nat, ts : Int) : Text {
     prefix # "_" # counter.toText() # "_" # ts.toText();
   };
@@ -95,45 +143,24 @@ actor {
     "tok_" # username # "_" # ts.toText();
   };
 
-  func firstChars(s : Text, n : Nat) : Text {
-    var result = "";
-    var count = 0;
-    for (c in s.chars()) {
-      if (count < n) {
-        result := result # Text.fromChar(c);
-        count += 1;
-      };
-    };
-    result;
-  };
-
-  func splitAtChar(s : Text, sep : Char) : Text {
-    var result = "";
-    for (c in s.chars()) {
-      if (c == sep) { return result };
-      result := result # Text.fromChar(c);
-    };
-    result;
-  };
-
-  func generateLoginCreds(email : Text, roleTitle : Text, id : Text) : (Text, Text) {
-    let emailPrefix = splitAtChar(email, '@');
-    let roleCode = firstChars(roleTitle, 3);
-    let username = emailPrefix # "_" # roleCode;
-    let h = simpleHash(id # email # roleTitle);
+  func generateLoginCreds(regId : Text, counter : Nat) : (Text, Text) {
+    let num = counter + 1000;
+    let userId = "CSM" # num.toText();
+    let h = simpleHash(regId # counter.toText());
     let charPool = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
     let charsArr = charPool.chars().toArray();
     let len = charsArr.size();
-    var pwd = "";
+    var suffix = "";
     var seed = h;
     var i = 0;
-    while (i < 8) {
+    while (i < 4) {
       let idx = seed % len;
-      pwd := pwd # Text.fromChar(charsArr[idx]);
+      suffix := suffix # Text.fromChar(charsArr[idx]);
       seed := (seed * 1103515245 + 12345) % 1_000_000_007;
       i += 1;
     };
-    (username, pwd);
+    let password = "Corp@" # suffix # "2026#";
+    (userId, password);
   };
 
   func isValidToken(token : Text) : Bool {
@@ -143,7 +170,7 @@ actor {
     };
   };
 
-  // ─── Admin Auth
+  // --- Admin Auth
   public func adminLogin(username : Text, password : Text) : async ?Text {
     let ok = (username == ADMIN1_USER and password == ADMIN1_PASS)
            or (username == ADMIN2_USER and password == ADMIN2_PASS);
@@ -165,7 +192,7 @@ actor {
     adminSessions.remove(token);
   };
 
-  // ─── Open Registration
+  // --- Registration
   public func submitRegistration(
     name : Text,
     dateOfBirth : Text,
@@ -211,19 +238,25 @@ actor {
     found;
   };
 
+  public query func getRegistrationStatusByMobile(mobile : Text) : async ?RegistrationRecord {
+    var found : ?RegistrationRecord = null;
+    var latestTs : Int = 0;
+    for (rec in registrations.values()) {
+      if (rec.mobile == mobile and rec.timestamp > latestTs) {
+        latestTs := rec.timestamp;
+        found := ?rec;
+      };
+    };
+    found;
+  };
+
   public query func getRegistrationStatusById(id : Text) : async ?RegistrationRecord {
     registrations.get(id);
   };
 
-  // ─── Admin Management
   public query func getAllRegistrations(token : Text) : async [RegistrationRecord] {
     if (not isValidToken(token)) { return [] };
-    let arr = registrations.values().toArray();
-    arr.sort(func(a : RegistrationRecord, b : RegistrationRecord) : { #less; #equal; #greater } {
-      if (a.timestamp > b.timestamp) { #less }
-      else if (a.timestamp < b.timestamp) { #greater }
-      else { #equal };
-    });
+    registrations.values().toArray();
   };
 
   public query func getPendingRegistrations(token : Text) : async [RegistrationRecord] {
@@ -236,12 +269,12 @@ actor {
     switch (registrations.get(regId)) {
       case null { false };
       case (?rec) {
-        let (uname, pwd) = generateLoginCreds(rec.email, rec.roleTitle, rec.id);
+        let (userId, pwd) = generateLoginCreds(rec.id, regCounter);
         let updated : RegistrationRecord = {
           rec with
           status = #approved;
           rejectionReason = null;
-          loginUsername = ?uname;
+          loginUsername = ?userId;
           loginPassword = ?pwd;
         };
         registrations.add(regId, updated);
@@ -266,7 +299,6 @@ actor {
     };
   };
 
-  // ─── Error Logging
   public func logFailedRegistration(
     email : Text,
     roleTitle : Text,
@@ -291,7 +323,6 @@ actor {
     failedLogs.values().toArray();
   };
 
-  // ─── Stats
   public query func getRegistrationStats(token : Text) : async RegistrationStats {
     if (not isValidToken(token)) {
       return { total = 0; pending = 0; approved = 0; rejected = 0; failed = 0 };
@@ -310,5 +341,168 @@ actor {
     };
     let failed = failedLogs.size();
     { total; pending; approved; rejected; failed };
+  };
+
+  // --- Booking System
+  public func submitBooking(
+    roomName : Text,
+    roomType : Text,
+    bookerName : Text,
+    panName : Text,
+    dob : Text,
+    mobile : Text,
+    email : Text,
+    purpose : Text,
+    bookingDate : Text,
+    bookingHour : Text,
+    bookingMinute : Text,
+    bookingSecond : Text,
+  ) : async Text {
+    for (b in bookings.values()) {
+      if (b.roomName == roomName and b.bookingDate == bookingDate and b.bookingHour == bookingHour and b.status != #rejected) {
+        return "CONFLICT: This room is already booked for that date and hour. Please choose a different time.";
+      };
+    };
+    let ts = Time.now();
+    bookingCounter += 1;
+    let id = generateId("BKG", bookingCounter, ts);
+    let record : BookingRecord = {
+      id = id;
+      roomName = roomName;
+      roomType = roomType;
+      bookerName = bookerName;
+      panName = panName;
+      dob = dob;
+      mobile = mobile;
+      email = email;
+      purpose = purpose;
+      bookingDate = bookingDate;
+      bookingHour = bookingHour;
+      bookingMinute = bookingMinute;
+      bookingSecond = bookingSecond;
+      timestamp = ts;
+      status = #pending;
+      approvedBookingId = null;
+      approvedAt = null;
+      rejectedAt = null;
+      rejectionReason = null;
+    };
+    bookings.add(id, record);
+    id;
+  };
+
+  public query func getBookingsByEmail(email : Text) : async [BookingRecord] {
+    bookings.values().filter(func(b : BookingRecord) : Bool { b.email == email }).toArray();
+  };
+
+  public query func getBookingsByMobile(mobile : Text) : async [BookingRecord] {
+    bookings.values().filter(func(b : BookingRecord) : Bool { b.mobile == mobile }).toArray();
+  };
+
+  public query func getBookingById(id : Text) : async ?BookingRecord {
+    bookings.get(id);
+  };
+
+  public query func getAllBookings(token : Text) : async [BookingRecord] {
+    if (not isValidToken(token)) { return [] };
+    bookings.values().toArray();
+  };
+
+  public query func getPendingBookings(token : Text) : async [BookingRecord] {
+    if (not isValidToken(token)) { return [] };
+    bookings.values().filter(func(b : BookingRecord) : Bool { b.status == #pending }).toArray();
+  };
+
+  public func approveBooking(token : Text, bookingId : Text) : async Bool {
+    if (not isValidToken(token)) { return false };
+    switch (bookings.get(bookingId)) {
+      case null { false };
+      case (?rec) {
+        let num = bookingCounter + 1000;
+        let approvedId = "EBC" # num.toText();
+        let ts = Time.now();
+        let updated : BookingRecord = {
+          rec with
+          status = #approved;
+          approvedBookingId = ?approvedId;
+          approvedAt = ?ts;
+          rejectionReason = null;
+        };
+        bookings.add(bookingId, updated);
+        true;
+      };
+    };
+  };
+
+  public func rejectBooking(token : Text, bookingId : Text, reason : Text) : async Bool {
+    if (not isValidToken(token)) { return false };
+    switch (bookings.get(bookingId)) {
+      case null { false };
+      case (?rec) {
+        let ts = Time.now();
+        let updated : BookingRecord = {
+          rec with
+          status = #rejected;
+          rejectedAt = ?ts;
+          rejectionReason = ?reason;
+        };
+        bookings.add(bookingId, updated);
+        true;
+      };
+    };
+  };
+
+  public query func getBookingStats(token : Text) : async BookingStats {
+    if (not isValidToken(token)) {
+      return { total = 0; pending = 0; approved = 0; rejected = 0 };
+    };
+    var total = 0;
+    var pending = 0;
+    var approved = 0;
+    var rejected = 0;
+    for (b in bookings.values()) {
+      total += 1;
+      switch (b.status) {
+        case (#pending) { pending += 1 };
+        case (#approved) { approved += 1 };
+        case (#rejected) { rejected += 1 };
+      };
+    };
+    { total; pending; approved; rejected };
+  };
+
+  // --- Service Rating System
+  public func submitRating(
+    bookingId : Text,
+    roomName : Text,
+    bookerName : Text,
+    email : Text,
+    selectedOptions : [Text],
+    overallComment : Text,
+  ) : async Text {
+    let ts = Time.now();
+    ratingCounter += 1;
+    let id = generateId("RTG", ratingCounter, ts);
+    let entry : ServiceRating = {
+      id = id;
+      bookingId = bookingId;
+      roomName = roomName;
+      bookerName = bookerName;
+      email = email;
+      selectedOptions = selectedOptions;
+      overallComment = overallComment;
+      timestamp = ts;
+    };
+    ratings.add(id, entry);
+    id;
+  };
+
+  public query func getRatingsByEmail(email : Text) : async [ServiceRating] {
+    ratings.values().filter(func(r : ServiceRating) : Bool { r.email == email }).toArray();
+  };
+
+  public query func getAllRatings(token : Text) : async [ServiceRating] {
+    if (not isValidToken(token)) { return [] };
+    ratings.values().toArray();
   };
 };

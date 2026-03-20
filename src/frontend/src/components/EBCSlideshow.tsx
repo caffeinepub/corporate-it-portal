@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useState } from "react";
+import { motion } from "motion/react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const SLIDES = [
   {
@@ -65,42 +65,84 @@ const SLIDES = [
   },
 ];
 
+// Preload all images immediately so there's no blank flash during transitions
+function usePreloadImages(srcs: string[]) {
+  const loaded = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const src of srcs) {
+      if (!loaded.current.has(src)) {
+        const img = new Image();
+        img.src = src;
+        loaded.current.add(src);
+      }
+    }
+  }, [srcs]);
+}
+
 export function EBCSlideshow() {
   const [current, setCurrent] = useState(0);
+  const [prev, setPrev] = useState<number | null>(null);
+  const [sliding, setSliding] = useState(false);
   const [direction, setDirection] = useState(1);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const next = useCallback(() => {
-    setDirection(1);
-    setCurrent((c) => (c + 1) % SLIDES.length);
-  }, []);
+  usePreloadImages(SLIDES.map((s) => s.src));
 
-  const prev = useCallback(() => {
-    setDirection(-1);
-    setCurrent((c) => (c - 1 + SLIDES.length) % SLIDES.length);
-  }, []);
+  const TRANSITION_MS = 600; // slide animation duration
+  const DISPLAY_MS = 1000; // each image display time
+
+  const navigate = useCallback(
+    (dir: number) => {
+      if (sliding) return;
+      setSliding(true);
+      setDirection(dir);
+      setPrev(current);
+      setCurrent((c) => (c + dir + SLIDES.length) % SLIDES.length);
+      setTimeout(() => {
+        setPrev(null);
+        setSliding(false);
+      }, TRANSITION_MS);
+    },
+    [current, sliding],
+  );
+
+  const next = useCallback(() => navigate(1), [navigate]);
+  const prevSlide = useCallback(() => navigate(-1), [navigate]);
 
   const goTo = useCallback(
     (idx: number) => {
-      setDirection(idx > current ? 1 : -1);
-      setCurrent(idx);
+      if (sliding || idx === current) return;
+      navigate(idx > current ? 1 : -1);
     },
-    [current],
+    [current, navigate, sliding],
   );
 
+  // Auto-slide: display for DISPLAY_MS then transition
   useEffect(() => {
-    const t = setInterval(next, 4000);
-    return () => clearInterval(t);
+    timerRef.current = setInterval(next, DISPLAY_MS + TRANSITION_MS);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, [next]);
 
-  const variants = {
-    enter: (d: number) => ({ opacity: 0, x: d > 0 ? 60 : -60 }),
-    center: { opacity: 1, x: 0 },
-    exit: (d: number) => ({ opacity: 0, x: d > 0 ? -60 : 60 }),
+  // Reset timer on manual nav
+  const manualNav = useCallback(
+    (fn: () => void) => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      fn();
+      timerRef.current = setInterval(next, DISPLAY_MS + TRANSITION_MS);
+    },
+    [next],
+  );
+
+  const slideOffset = (isEntering: boolean) => {
+    if (isEntering) return direction > 0 ? "100%" : "-100%";
+    return direction > 0 ? "-100%" : "100%";
   };
 
   return (
     <div className="w-full" data-ocid="ebc.slideshow.section">
-      {/* ── WELCOME BANNER ── prominent section ABOVE the carousel */}
+      {/* ── WELCOME BANNER ── */}
       <div
         className="w-full py-5 px-4 mb-3 rounded-xl flex flex-col items-center justify-center gap-2"
         style={{
@@ -111,7 +153,6 @@ export function EBCSlideshow() {
             "0 0 40px rgba(85,214,255,0.12), inset 0 0 60px rgba(85,214,255,0.04)",
         }}
       >
-        {/* Decorative top line */}
         <div
           className="w-24 h-0.5 mb-1 rounded-full"
           style={{
@@ -119,7 +160,6 @@ export function EBCSlideshow() {
               "linear-gradient(90deg, transparent, rgba(85,214,255,0.7), transparent)",
           }}
         />
-
         <motion.h2
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -136,8 +176,6 @@ export function EBCSlideshow() {
         >
           WELCOME TO EBC BOOKING MANAGEMENT SYSTEM
         </motion.h2>
-
-        {/* Decorative bottom line */}
         <div
           className="w-24 h-0.5 mt-1 rounded-full"
           style={{
@@ -153,25 +191,21 @@ export function EBCSlideshow() {
         style={{ height: "clamp(220px, 42vw, 480px)" }}
         data-ocid="ebc.slideshow.panel"
       >
-        {/* Slides */}
-        <AnimatePresence custom={direction} mode="wait">
+        {/* Previous slide (sliding out) */}
+        {prev !== null && (
           <motion.div
-            key={current}
-            custom={direction}
-            variants={variants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.5, ease: "easeInOut" }}
+            key={`prev-${prev}`}
             className="absolute inset-0"
+            initial={{ x: 0 }}
+            animate={{ x: slideOffset(false) }}
+            transition={{ duration: TRANSITION_MS / 1000, ease: "easeInOut" }}
           >
             <img
-              src={SLIDES[current].src}
-              alt={SLIDES[current].label}
+              src={SLIDES[prev].src}
+              alt={SLIDES[prev].label}
               className="w-full h-full object-cover"
-              loading="lazy"
+              draggable={false}
             />
-            {/* Gradient overlay for text readability */}
             <div
               className="absolute inset-0"
               style={{
@@ -180,9 +214,32 @@ export function EBCSlideshow() {
               }}
             />
           </motion.div>
-        </AnimatePresence>
+        )}
 
-        {/* Slide label at bottom-left */}
+        {/* Current slide (sliding in) */}
+        <motion.div
+          key={`curr-${current}`}
+          className="absolute inset-0"
+          initial={{ x: sliding ? slideOffset(true) : 0 }}
+          animate={{ x: 0 }}
+          transition={{ duration: TRANSITION_MS / 1000, ease: "easeInOut" }}
+        >
+          <img
+            src={SLIDES[current].src}
+            alt={SLIDES[current].label}
+            className="w-full h-full object-cover"
+            draggable={false}
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(4,13,22,0.25) 0%, rgba(4,13,22,0.05) 40%, rgba(4,13,22,0.35) 100%)",
+            }}
+          />
+        </motion.div>
+
+        {/* Slide label */}
         <div
           className="absolute bottom-10 left-4 z-10"
           style={{
@@ -201,10 +258,10 @@ export function EBCSlideshow() {
           </p>
         </div>
 
-        {/* Prev / Next buttons */}
+        {/* Prev button */}
         <button
           type="button"
-          onClick={prev}
+          onClick={() => manualNav(prevSlide)}
           data-ocid="ebc.slideshow.prev_button"
           aria-label="Previous slide"
           className="absolute left-3 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-9 h-9 rounded-full transition-all"
@@ -216,9 +273,11 @@ export function EBCSlideshow() {
         >
           <ChevronLeft size={18} />
         </button>
+
+        {/* Next button */}
         <button
           type="button"
-          onClick={next}
+          onClick={() => manualNav(next)}
           data-ocid="ebc.slideshow.next_button"
           aria-label="Next slide"
           className="absolute right-3 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-9 h-9 rounded-full transition-all"
@@ -237,7 +296,7 @@ export function EBCSlideshow() {
             <button
               key={slide.src}
               type="button"
-              onClick={() => goTo(i)}
+              onClick={() => manualNav(() => goTo(i))}
               data-ocid={`ebc.slideshow.dot.${i + 1}`}
               aria-label={`Go to slide ${i + 1}`}
               className="rounded-full transition-all"

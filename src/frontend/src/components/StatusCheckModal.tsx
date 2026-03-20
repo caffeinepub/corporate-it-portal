@@ -11,11 +11,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
-import type {
-  backendInterface as NewBackend,
-  RegistrationRecord,
-} from "../backend.d";
-import { useBackend } from "../hooks/useBackend";
+import type { RegistrationRecord } from "../hooks/useNexusActor";
+import { unwrapOpt, useNexusActor } from "../hooks/useNexusActor";
 
 function getStatus(
   rec: RegistrationRecord,
@@ -29,7 +26,7 @@ function fmtTs(ts: bigint) {
   try {
     return new Date(Number(ts / 1_000_000n)).toLocaleString();
   } catch {
-    return "—";
+    return "\u2014";
   }
 }
 
@@ -39,8 +36,9 @@ interface Props {
 }
 
 export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
-  const { actor, isFetching } = useBackend();
-  const [email, setEmail] = useState(prefillEmail);
+  const { actor, isFetching } = useNexusActor();
+  const [searchValue, setSearchValue] = useState(prefillEmail);
+  const [searchType, setSearchType] = useState<"email" | "mobile">("email");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<RegistrationRecord | null | "not_found">(
     null,
@@ -49,23 +47,48 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
   const [copiedUser, setCopiedUser] = useState(false);
   const [copiedPass, setCopiedPass] = useState(false);
 
-  async function handleCheck(e: React.FormEvent) {
-    e.preventDefault();
-    if (!email.trim()) return;
+  // Poll every 10 seconds for real-time update
+  const [polling, setPolling] = useState(false);
+
+  async function fetchStatus(value: string, type: "email" | "mobile") {
     if (!actor) {
       setError("Backend not ready. Please try again.");
       return;
     }
-    setLoading(true);
-    setError("");
     try {
-      const nb = actor as unknown as NewBackend;
-      const rec = await nb.getRegistrationStatusByEmail(email.trim());
+      const nb = actor;
+      let rec: RegistrationRecord | null = null;
+      if (type === "email") {
+        rec = unwrapOpt(await nb.getRegistrationStatusByEmail(value.trim()));
+      } else {
+        rec = unwrapOpt(await nb.getRegistrationStatusByMobile(value.trim()));
+      }
       setResult(rec ?? "not_found");
+      setError("");
     } catch (_) {
       setError("Failed to fetch status. Please try again.");
-    } finally {
-      setLoading(false);
+    }
+  }
+
+  async function handleCheck(e: React.FormEvent) {
+    e.preventDefault();
+    if (!searchValue.trim()) return;
+    setLoading(true);
+    setError("");
+    await fetchStatus(searchValue, searchType);
+    setLoading(false);
+    // Start polling for real-time updates
+    if (!polling) {
+      setPolling(true);
+      const interval = setInterval(async () => {
+        if (!searchValue.trim()) {
+          clearInterval(interval);
+          return;
+        }
+        await fetchStatus(searchValue, searchType);
+      }, 10000);
+      // Stop after 5 minutes
+      setTimeout(() => clearInterval(interval), 5 * 60 * 1000);
     }
   }
 
@@ -138,7 +161,7 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                 Check Registration Status
               </h2>
               <p className="text-xs" style={{ color: "rgba(100,180,220,0.6)" }}>
-                Enter your registered email address
+                Enter your registered email or mobile number
               </p>
             </div>
           </div>
@@ -147,20 +170,90 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
         {/* Scrollable body */}
         <ScrollArea style={{ flex: 1, minHeight: 0 }}>
           <div className="px-8 py-6 space-y-5">
+            {/* Toggle email / mobile */}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchType("email");
+                  setSearchValue("");
+                  setResult(null);
+                }}
+                style={{
+                  flex: 1,
+                  padding: "6px 0",
+                  borderRadius: "8px",
+                  fontSize: "0.7rem",
+                  fontWeight: 700,
+                  letterSpacing: "0.1em",
+                  cursor: "pointer",
+                  border:
+                    searchType === "email"
+                      ? "1px solid rgba(85,214,255,0.6)"
+                      : "1px solid rgba(85,214,255,0.18)",
+                  background:
+                    searchType === "email"
+                      ? "rgba(85,214,255,0.12)"
+                      : "rgba(12,28,42,0.5)",
+                  color:
+                    searchType === "email"
+                      ? "#55d6ff"
+                      : "rgba(100,180,220,0.5)",
+                }}
+              >
+                EMAIL
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchType("mobile");
+                  setSearchValue("");
+                  setResult(null);
+                }}
+                style={{
+                  flex: 1,
+                  padding: "6px 0",
+                  borderRadius: "8px",
+                  fontSize: "0.7rem",
+                  fontWeight: 700,
+                  letterSpacing: "0.1em",
+                  cursor: "pointer",
+                  border:
+                    searchType === "mobile"
+                      ? "1px solid rgba(85,214,255,0.6)"
+                      : "1px solid rgba(85,214,255,0.18)",
+                  background:
+                    searchType === "mobile"
+                      ? "rgba(85,214,255,0.12)"
+                      : "rgba(12,28,42,0.5)",
+                  color:
+                    searchType === "mobile"
+                      ? "#55d6ff"
+                      : "rgba(100,180,220,0.5)",
+                }}
+              >
+                MOBILE NUMBER
+              </button>
+            </div>
+
             <form onSubmit={handleCheck} className="space-y-4">
               <div className="space-y-1.5">
                 <Label
                   className="text-xs font-montserrat tracking-widest uppercase"
                   style={{ color: "rgba(100,180,220,0.7)" }}
                 >
-                  Email Address
+                  {searchType === "email" ? "Email Address" : "Mobile Number"}
                 </Label>
                 <Input
                   data-ocid="status_check.input"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your@email.com"
+                  type={searchType === "email" ? "email" : "tel"}
+                  value={searchValue}
+                  onChange={(e) => setSearchValue(e.target.value)}
+                  placeholder={
+                    searchType === "email"
+                      ? "your@email.com"
+                      : "Enter your mobile number"
+                  }
                   style={{
                     background: "rgba(12,28,42,0.8)",
                     border: "1px solid rgba(85,214,255,0.25)",
@@ -205,7 +298,8 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                   className="text-sm"
                   style={{ color: "rgba(160,200,230,0.7)" }}
                 >
-                  No registration found for this email address.
+                  No registration found for this{" "}
+                  {searchType === "email" ? "email address" : "mobile number"}.
                 </p>
               </div>
             )}
@@ -233,21 +327,21 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                       className="text-xs mt-0.5"
                       style={{ color: "rgba(160,200,230,0.7)" }}
                     >
-                      {result.name} — {result.roleTitle}
+                      {result.name} \u2014 {result.roleTitle}
                     </p>
                     <p
                       className="text-xs mt-0.5"
                       style={{ color: "rgba(120,160,200,0.5)" }}
                     >
-                      Submitted: {fmtTs(result.timestamp)}
+                      Request Date: {fmtTs(result.timestamp)}
                     </p>
                   </div>
                 </div>
 
-                {/* ── APPROVED ── */}
+                {/* \u2500\u2500 APPROVED \u2500\u2500 */}
                 {status === "approved" && (
                   <>
-                    {/* Heading */}
+                    {/* Approval heading */}
                     <div
                       className="p-4 rounded-xl text-center"
                       style={{
@@ -269,7 +363,7 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                       </p>
                     </div>
 
-                    {/* Credentials box — prominent */}
+                    {/* Credentials box */}
                     {result.loginUsername && (
                       <div
                         className="p-5 rounded-xl space-y-4"
@@ -283,10 +377,10 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                           className="text-xs font-montserrat font-bold tracking-widest uppercase"
                           style={{ color: "rgba(0,220,120,0.8)" }}
                         >
-                          🔑 Your Login Credentials
+                          \uD83D\uDD11 Your Login Credentials
                         </p>
 
-                        {/* Username row */}
+                        {/* User ID row */}
                         <div
                           className="p-3 rounded-lg flex items-center justify-between gap-3"
                           style={{
@@ -299,7 +393,7 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                               className="text-xs font-montserrat tracking-widest uppercase mb-1"
                               style={{ color: "rgba(0,220,120,0.6)" }}
                             >
-                              Username
+                              User ID
                             </p>
                             <code
                               className="font-bold"
@@ -311,9 +405,14 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                           <button
                             type="button"
                             onClick={() =>
-                              copyText(result.loginUsername!, "user")
+                              copyText(
+                                unwrapOpt(
+                                  result.loginUsername as [] | [string],
+                                ) ?? "",
+                                "user",
+                              )
                             }
-                            title="Copy username"
+                            title="Copy User ID"
                             style={{
                               background: copiedUser
                                 ? "rgba(0,220,120,0.25)"
@@ -356,7 +455,12 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                           <button
                             type="button"
                             onClick={() =>
-                              copyText(result.loginPassword!, "pass")
+                              copyText(
+                                unwrapOpt(
+                                  result.loginPassword as [] | [string],
+                                ) ?? "",
+                                "pass",
+                              )
                             }
                             title="Copy password"
                             style={{
@@ -380,13 +484,13 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                           className="text-xs"
                           style={{ color: "rgba(160,200,180,0.6)" }}
                         >
-                          ⚠ Keep your credentials secure. Do not share with
+                          \u26A0 Keep your credentials secure. Do not share with
                           anyone.
                         </p>
                       </div>
                     )}
 
-                    {/* 100-word corporate approval message */}
+                    {/* Approval message */}
                     <div
                       className="p-5 rounded-xl"
                       style={{
@@ -399,41 +503,73 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                         className="text-xs font-montserrat font-bold tracking-widest uppercase mb-3"
                         style={{ color: "rgba(0,220,120,0.7)" }}
                       >
-                        ✦ Official Welcome Message
+                        \u2756 Official Welcome Message
                       </p>
-                      <p
-                        className="text-sm leading-relaxed"
+                      <div
+                        className="text-sm leading-relaxed space-y-3"
                         style={{
-                          color: "rgba(200,240,220,0.82)",
-                          fontStyle: "italic",
-                          lineHeight: "1.8",
+                          color: "rgba(200,240,220,0.88)",
+                          lineHeight: "1.9",
                         }}
                       >
-                        Dear{" "}
-                        <strong
-                          style={{ color: "#e2f4ff", fontStyle: "normal" }}
-                        >
-                          {result.name}
-                        </strong>
-                        , we are pleased to inform you that your registration on
-                        NEXUS IT PORTAL has been approved by our administration
-                        team. Your account credentials are provided above.
-                        Please keep them secure and do not share with anyone.
-                        You may now log in to access your role-specific
-                        dashboard. We welcome you to our corporate enterprise
-                        system and look forward to your contributions. If you
-                        have any questions or require assistance, please contact
-                        our support team. Once again, congratulations on your
-                        approval. — NEXUS IT Portal Administration
-                      </p>
+                        <p>
+                          Dear{" "}
+                          <strong style={{ color: "#e2f4ff" }}>
+                            {result.name}
+                          </strong>
+                          ,
+                        </p>
+                        <p>
+                          We are delighted to inform you that your registration
+                          request has been successfully approved by our
+                          Application Administration Team.
+                        </p>
+                        <p>
+                          We extend our sincere appreciation for your patience
+                          and for choosing to be part of our Conference Service
+                          Management System. Your inclusion strengthens our
+                          commitment to maintaining a well-organized, efficient,
+                          and professional corporate environment.
+                        </p>
+                        <p>
+                          Your login credentials have now been securely
+                          generated, enabling you to access the system and its
+                          features. We encourage you to use the platform
+                          responsibly, maintain data accuracy, and follow all
+                          operational guidelines to ensure smooth coordination
+                          across departments.
+                        </p>
+                        <p>
+                          At our organization, we value discipline,
+                          transparency, and collaboration. Your cooperation
+                          plays a vital role in maintaining these standards.
+                        </p>
+                        <p>
+                          We are confident that this system will enhance your
+                          workflow experience and contribute positively to your
+                          daily operations.
+                        </p>
+                        <p>
+                          Welcome aboard, and we look forward to your active
+                          participation.
+                        </p>
+                        <p className="pt-1">
+                          <strong style={{ color: "rgba(0,220,120,0.8)" }}>
+                            Best Regards,
+                          </strong>
+                          <br />
+                          <span style={{ color: "rgba(0,220,120,0.7)" }}>
+                            Corporate IT &amp; Administration Team
+                          </span>
+                        </p>
+                      </div>
                     </div>
                   </>
                 )}
 
-                {/* ── REJECTED ── */}
+                {/* \u2500\u2500 REJECTED \u2500\u2500 */}
                 {status === "rejected" && (
                   <>
-                    {/* Rejection reason */}
                     {result.rejectionReason && (
                       <div
                         className="p-4 rounded-xl"
@@ -457,7 +593,7 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                       </div>
                     )}
 
-                    {/* 100-word corporate rejection message */}
+                    {/* Rejection message */}
                     <div
                       className="p-5 rounded-xl"
                       style={{
@@ -470,45 +606,57 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                         className="text-xs font-montserrat font-bold tracking-widest uppercase mb-3"
                         style={{ color: "rgba(249,115,22,0.7)" }}
                       >
-                        ✦ Official Notice
+                        \u2756 Official Notice
                       </p>
-                      <p
-                        className="text-sm leading-relaxed"
+                      <div
+                        className="text-sm leading-relaxed space-y-3"
                         style={{
-                          color: "rgba(240,200,190,0.82)",
-                          fontStyle: "italic",
-                          lineHeight: "1.8",
+                          color: "rgba(240,200,190,0.88)",
+                          lineHeight: "1.9",
                         }}
                       >
-                        Dear{" "}
-                        <strong
-                          style={{ color: "#e2f4ff", fontStyle: "normal" }}
-                        >
-                          {result.name}
-                        </strong>
-                        , after careful review of your registration request on
-                        NEXUS IT PORTAL, our administration team has been unable
-                        to approve your application at this time. We understand
-                        this may be disappointing, and we sincerely appreciate
-                        your interest in our enterprise system. If you believe
-                        this decision was made in error or require further
-                        clarification, please contact our support team at{" "}
-                        <a
-                          href="mailto:contact.adminvicky@myapp.com"
-                          style={{ color: "#55d6ff", fontStyle: "normal" }}
-                        >
-                          contact.adminvicky@myapp.com
-                        </a>
-                        . You are welcome to resubmit your registration with
-                        updated information. Thank you for your understanding
-                        and professionalism. We wish you the best. — NEXUS IT
-                        Portal Administration
-                      </p>
+                        <p>
+                          Dear{" "}
+                          <strong style={{ color: "#e2f4ff" }}>
+                            {result.name}
+                          </strong>
+                          ,
+                        </p>
+                        <p>
+                          Thank you for your interest in accessing our
+                          Conference Service Management System.
+                        </p>
+                        <p>
+                          After careful review, we regret to inform you that
+                          your registration request has not been approved at
+                          this time.
+                        </p>
+                        <p>
+                          This decision is based on internal verification and
+                          system access policies designed to maintain
+                          operational security and data integrity.
+                        </p>
+                        <p>
+                          If you believe your request requires reconsideration,
+                          you may contact the Application Administration Team
+                          with appropriate details and supporting information.
+                        </p>
+                        <p>We appreciate your understanding and cooperation.</p>
+                        <p className="pt-1">
+                          <strong style={{ color: "rgba(249,115,22,0.8)" }}>
+                            Best Regards,
+                          </strong>
+                          <br />
+                          <span style={{ color: "rgba(249,115,22,0.7)" }}>
+                            Corporate Administration Team
+                          </span>
+                        </p>
+                      </div>
                     </div>
                   </>
                 )}
 
-                {/* ── PENDING ── */}
+                {/* \u2500\u2500 PENDING \u2500\u2500 */}
                 {status === "pending" && (
                   <div
                     className="p-5 rounded-xl"
@@ -522,7 +670,7 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                       className="text-xs font-montserrat font-bold tracking-widest uppercase mb-3"
                       style={{ color: "rgba(245,196,0,0.7)" }}
                     >
-                      ✦ Application Status Update
+                      \u2756 Application Status Update
                     </p>
                     <div
                       className="flex items-center gap-2 mb-3 p-2 rounded-lg"
@@ -536,38 +684,55 @@ export function StatusCheckModal({ onClose, prefillEmail = "" }: Props) {
                         className="text-xs font-montserrat"
                         style={{ color: "rgba(245,196,0,0.8)" }}
                       >
-                        Submitted: {fmtTs(result.timestamp)}
+                        Request Date: {fmtTs(result.timestamp)}
                       </p>
                     </div>
-                    <p
-                      className="text-sm leading-relaxed"
+                    <div
+                      className="text-sm leading-relaxed space-y-3"
                       style={{
-                        color: "rgba(240,220,160,0.82)",
-                        fontStyle: "italic",
-                        lineHeight: "1.8",
+                        color: "rgba(240,220,160,0.88)",
+                        lineHeight: "1.9",
                       }}
                     >
-                      Dear{" "}
-                      <strong style={{ color: "#e2f4ff", fontStyle: "normal" }}>
-                        {result.name}
-                      </strong>
-                      , your registration application for the role of{" "}
-                      <strong style={{ color: "#f5d060", fontStyle: "normal" }}>
-                        {result.roleTitle}
-                      </strong>{" "}
-                      has been received and is currently under review by our
-                      administration team. We appreciate your patience. You will
-                      be able to check your updated status here at any time. Our
-                      typical review period is 24 to 48 business hours. Thank
-                      you for your interest in joining the NEXUS IT Portal
-                      enterprise system.
-                    </p>
-                    <p
-                      className="text-xs font-montserrat font-bold tracking-widest mt-4"
-                      style={{ color: "rgba(245,196,0,0.5)" }}
-                    >
-                      — NEXUS IT Portal Administration
-                    </p>
+                      <p>
+                        Dear{" "}
+                        <strong style={{ color: "#e2f4ff" }}>
+                          {result.name}
+                        </strong>
+                        ,
+                      </p>
+                      <p>
+                        Thank you for registering with our Conference Service
+                        Management System.
+                      </p>
+                      <p>
+                        We sincerely appreciate your interest in being part of
+                        our corporate workflow environment. Your registration
+                        request has been successfully received and is currently
+                        under review by our Application Administration Team.
+                      </p>
+                      <p>
+                        We value your patience and cooperation during this
+                        process. Our team is carefully verifying your details to
+                        ensure a secure and well-structured system experience
+                        for all users.
+                      </p>
+                      <p>
+                        Kindly allow us some time to complete the verification.
+                        You will be notified shortly once your request has been
+                        reviewed and processed.
+                      </p>
+                      <p>We look forward to welcoming you onboard.</p>
+                      <p className="pt-1">
+                        <strong style={{ color: "rgba(245,196,0,0.7)" }}>
+                          Best Regards,
+                        </strong>
+                        <br />
+                        <span style={{ color: "rgba(245,196,0,0.6)" }}>
+                          Corporate Administration Team
+                        </span>
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
