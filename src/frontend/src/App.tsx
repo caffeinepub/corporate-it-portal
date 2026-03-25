@@ -16,21 +16,13 @@ import {
   UtensilsCrossed,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { AdminLoginModal } from "./components/AdminLoginModal";
-import { BookingStatusModal } from "./components/BookingStatusModal";
-import { ConferenceRoomsSection } from "./components/ConferenceRoomsSection";
-import { DiningRoomsSection } from "./components/DiningRoomsSection";
 import { EBCSlideshow } from "./components/EBCSlideshow";
 import { RegistrationModal } from "./components/RegistrationModal";
 import { StatusCheckModal } from "./components/StatusCheckModal";
-import { UserBookingDashboard } from "./components/UserBookingDashboard";
 import { useAdminAuth } from "./hooks/useAdminAuth";
-import { onCanisterReady, warmUpCanister } from "./hooks/useNexusActor";
-
-// Start warming up canister immediately on module load
-warmUpCanister(15, 3000);
 
 // ─── Role definitions ──────────────────────────────────────────────────────────
 export const ROLES = [
@@ -474,62 +466,13 @@ function RoleCard({
   );
 }
 
-// ─── Server status banner ────────────────────────────────────────────────────────
-function ServerStatusBanner() {
-  const [ready, setReady] = useState(false);
-  const [show, setShow] = useState(true);
-
-  useEffect(() => {
-    const unsub = onCanisterReady((r) => {
-      setReady(r);
-      if (r) {
-        // Hide banner 3 seconds after server is ready
-        setTimeout(() => setShow(false), 3000);
-      }
-    });
-    return unsub;
-  }, []);
-
-  if (!show) return null;
-
-  return (
-    <div
-      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-full text-xs font-montserrat font-bold tracking-widest uppercase"
-      style={{
-        background: ready ? "rgba(0,220,120,0.12)" : "rgba(255,200,50,0.1)",
-        border: ready
-          ? "1px solid rgba(0,220,120,0.3)"
-          : "1px solid rgba(255,200,50,0.25)",
-        color: ready ? "#00dc78" : "rgba(255,200,50,0.9)",
-        boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
-        backdropFilter: "blur(10px)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      <span
-        className="w-2 h-2 rounded-full flex-shrink-0"
-        style={{
-          background: ready ? "#00dc78" : "#ffc832",
-          animation: ready ? "none" : "system-blink 1s step-end infinite",
-        }}
-      />
-      {ready
-        ? "Server Ready — You can register & book rooms"
-        : "Server starting up — please wait before submitting"}
-    </div>
-  );
-}
-
 // ─── Main App ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const { isAdmin, isFetching: isVerifying, getToken, logout } = useAdminAuth();
-  const token = getToken();
+  const { isAdmin, isVerifying, token, logout } = useAdminAuth();
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [showStatusCheck, setShowStatusCheck] = useState(false);
   const [statusCheckEmail, setStatusCheckEmail] = useState("");
   const [activeRole, setActiveRole] = useState<RoleDef | null>(null);
-  const [showBookingStatus, setShowBookingStatus] = useState(false);
-  const [showUserDashboard, setShowUserDashboard] = useState(false);
 
   function openStatusCheck(email = "") {
     setStatusCheckEmail(email);
@@ -608,6 +551,7 @@ export default function App() {
 
           {/* Nav actions */}
           <div className="flex items-center gap-2">
+            {/* Check Status - always visible */}
             <button
               type="button"
               onClick={() => openStatusCheck()}
@@ -616,15 +560,6 @@ export default function App() {
             >
               <Search size={14} />
               <span className="hidden sm:inline">Check Status</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowUserDashboard(true)}
-              data-ocid="nav.booking_status.button"
-              className="btn-cyan flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-montserrat font-bold tracking-widest uppercase"
-            >
-              <Search size={14} />
-              <span className="hidden sm:inline">My Bookings</span>
             </button>
 
             {isVerifying ? null : isAdmin ? (
@@ -761,49 +696,6 @@ export default function App() {
                   ))}
                 </div>
               </section>
-
-              {/* Book a Room */}
-              <section className="max-w-7xl mx-auto px-4 pb-4">
-                <div className="flex items-center gap-4 mb-2">
-                  <div
-                    className="flex-1 h-px"
-                    style={{
-                      background:
-                        "linear-gradient(90deg, transparent, rgba(85,214,255,0.2), transparent)",
-                    }}
-                  />
-                  <h2
-                    className="font-montserrat font-black text-base tracking-widest uppercase"
-                    style={{
-                      color: "rgba(85,214,255,0.6)",
-                      letterSpacing: "0.25em",
-                    }}
-                  >
-                    BOOK A ROOM
-                  </h2>
-                  <div
-                    className="flex-1 h-px"
-                    style={{
-                      background:
-                        "linear-gradient(90deg, transparent, rgba(85,214,255,0.2), transparent)",
-                    }}
-                  />
-                </div>
-                <p
-                  className="text-center text-xs font-montserrat tracking-widest uppercase"
-                  style={{ color: "rgba(100,180,220,0.4)" }}
-                >
-                  Select a conference or dining room to make a reservation
-                </p>
-              </section>
-
-              <section className="max-w-7xl mx-auto px-4 pb-12">
-                <ConferenceRoomsSection />
-              </section>
-
-              <section className="max-w-7xl mx-auto px-4 pb-12">
-                <DiningRoomsSection />
-              </section>
             </motion.div>
           )}
         </AnimatePresence>
@@ -830,9 +722,6 @@ export default function App() {
 
       <Toaster />
 
-      {/* ── Server status banner ── */}
-      <ServerStatusBanner />
-
       {/* ── Modals ── */}
       <AnimatePresence>
         {showAdminLogin && (
@@ -850,12 +739,6 @@ export default function App() {
             onClose={() => setActiveRole(null)}
             onStatusCheck={(email) => openStatusCheck(email)}
           />
-        )}
-        {showBookingStatus && (
-          <BookingStatusModal onClose={() => setShowBookingStatus(false)} />
-        )}
-        {showUserDashboard && (
-          <UserBookingDashboard onClose={() => setShowUserDashboard(false)} />
         )}
       </AnimatePresence>
     </div>
